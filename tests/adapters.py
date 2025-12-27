@@ -5,6 +5,8 @@ import sys
 from collections.abc import Iterable
 import multiprocessing
 from typing import IO, Any, BinaryIO
+import time
+from cs336_basics.pretokenization import get_word_counts_parallel
 
 import numpy.typing as npt
 import torch
@@ -564,7 +566,8 @@ def get_tokenizer(
     """
     raise NotImplementedError
 
- # Pybind11 setup
+
+# Pybind11 setup
 cpp_build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../cpp/build"))
 if cpp_build_dir not in sys.path:
     sys.path.append(cpp_build_dir)
@@ -573,6 +576,7 @@ try:
     import bpe
 except ImportError:
     pass
+
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -583,21 +587,21 @@ def run_train_bpe(
     """
     Train BPE on the given input file.
     """
-    # 1. Compute word counts
-    from cs336_basics.pretokenization import get_word_counts_parallel
-
-     # Use all available CPU cores for pre-tokenization
-    cpu_cores = min(multiprocessing.cpu_count(), 16)
+    t0 = time.time()
+    cpu_cores = min(multiprocessing.cpu_count(), 24)
     print(f"Using {cpu_cores} cores for pre-tokenization")
     total_word_counts = get_word_counts_parallel(str(input_path), special_tokens, cpu_cores)
+    t1 = time.time()
 
-    # 2. Prepare data for C++
-    # Sort by count descending, then by word ascending (for determinism)
     sorted_items = sorted(total_word_counts.items(), key=lambda x: (-x[1], x[0]))
     distinct_words = [w for w, c in sorted_items]
     counts = [c for w, c in sorted_items]
 
-    # Call C++ train
+    t2 = time.time()
     result = bpe.train(distinct_words, counts, vocab_size, special_tokens)
+    t3 = time.time()
+
+    print(f"Pre-tokenization time: {t1 - t0:.3f}s")
+    print(f"BPE training time: {t3 - t2:.3f}s")
 
     return result.vocab, result.merges
