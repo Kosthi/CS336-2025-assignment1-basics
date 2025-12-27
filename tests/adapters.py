@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
+import ctypes
 from collections.abc import Iterable
-from collections import defaultdict
+import multiprocessing
 from typing import IO, Any, BinaryIO
 
 import numpy.typing as npt
@@ -564,6 +566,22 @@ def get_tokenizer(
     """
     raise NotImplementedError
 
+ # Load C++ library
+cpp_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../cpp"))
+header_path = os.path.join(cpp_dir, "bpe.hpp")
+lib_ext = ".dylib" if sys.platform == "darwin" else ".so"
+lib_path = os.path.join(cpp_dir, f"build/libbpe{lib_ext}")
+
+try:
+    if sys.platform != "darwin":
+        # On Linux, we need to load the library with RTLD_GLOBAL to ensure
+        # that symbols like std::allocator are visible to the JIT.
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    cppyy.include(header_path)
+    cppyy.load_library(lib_path)
+except Exception as e:
+    # It might be already loaded or fail if library is missing
+    pass
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -574,14 +592,12 @@ def run_train_bpe(
     """
     Train BPE on the given input file.
     """
-    # Set OMP_NUM_THREADS=1 to avoid segmentation faults with OpenMP in C++
-    # This is necessary because of potential conflicts between Python/cppyy and OpenMP threading,
-    # or stack size limits in worker threads.
-    os.environ["OMP_NUM_THREADS"] = "1"
-
     # 1. Compute word counts
     from cs336_basics.pretokenization import get_word_counts_parallel
 
+     # Use all available CPU cores for pre-tokenization
+    cpu_cores = multiprocessing.cpu_count()
+    print(f"Using {cpu_cores} cores for pre-tokenization")
     total_word_counts = get_word_counts_parallel(str(input_path), special_tokens)
 
     # 2. Prepare data for C++
@@ -593,16 +609,18 @@ def run_train_bpe(
     # Load C++ library
     cpp_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../cpp"))
     header_path = os.path.join(cpp_dir, "bpe.hpp")
-    lib_path = os.path.join(cpp_dir, "build/libbpe.dylib")
+    lib_ext = ".dylib" if sys.platform == "darwin" else ".so"
+    lib_path = os.path.join(cpp_dir, f"build/libbpe{lib_ext}")
 
     if not os.path.exists(lib_path):
         raise RuntimeError(f"Library not found at {lib_path}. Please run cmake & make in cpp/build.")
 
+    # Ensure library is loaded (if it wasn't loaded at import time)
     try:
-        cppyy.include(header_path)
+        if sys.platform != "darwin":
+            ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
         cppyy.load_library(lib_path)
-    except Exception as e:
-        # It might be already loaded
+    except Exception:
         pass
 
     # Call C++ train
