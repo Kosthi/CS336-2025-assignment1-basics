@@ -5,6 +5,7 @@ import functools
 import regex as re
 from collections import defaultdict
 import time
+import mmap
 
 
 def find_chunk_boundaries(
@@ -70,10 +71,9 @@ def process_chunk(
     gpt2_pat = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
     with open(input_path, "rb") as f:
-        f.seek(start)
-        # Read the chunk
-        chunk_bytes = f.read(end - start)
-        text = chunk_bytes.decode("utf-8", errors="ignore")
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            chunk_bytes = mm[start:end]
+            text = chunk_bytes.decode("utf-8", errors="ignore")
 
     # Pre-tokenization
     if special_tokens:
