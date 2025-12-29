@@ -589,17 +589,23 @@ def run_train_bpe(
     """
     t0 = time.time()
     cpu_cores = min(multiprocessing.cpu_count(), 24)
-    print(f"Using {cpu_cores} cores for pre-tokenization")
+    print(f"Using {cpu_cores} cores for pre-tokenization", flush=True)
+    print("[driver] start get_word_counts_parallel", flush=True)
     total_word_counts = get_word_counts_parallel(str(input_path), special_tokens, cpu_cores)
     t1 = time.time()
+    print(f"[driver] done get_word_counts_parallel, words={len(total_word_counts)}", flush=True)
 
+    print("[driver] start sorting word counts", flush=True)
     sorted_items = sorted(total_word_counts.items(), key=lambda x: (-x[1], x[0]))
     distinct_words = [w for w, c in sorted_items]
     counts = [c for w, c in sorted_items]
+    print(f"[driver] done sorting, distinct_words={len(distinct_words)}", flush=True)
 
     t2 = time.time()
+    print("[driver] start bpe.train", flush=True)
     result = bpe.train(distinct_words, counts, vocab_size, special_tokens)
     t3 = time.time()
+    print("[driver] done bpe.train", flush=True)
 
     print(f"Pre-tokenization time: {t1 - t0:.3f}s")
     print(f"BPE training time: {t3 - t2:.3f}s")

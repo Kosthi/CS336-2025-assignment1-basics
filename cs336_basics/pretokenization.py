@@ -6,7 +6,7 @@ import regex as re
 from collections import defaultdict
 import time
 import mmap
-
+from functools import lru_cache
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -54,6 +54,12 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
+# 在 process_chunk 函数内部顶部添加
+@lru_cache(maxsize=65536)
+def encode_word(word: str) -> bytes:
+    """缓存编码结果，对重复单词极快"""
+    return word.encode("utf-8")
+
 
 def process_chunk(
     start: int,
@@ -64,31 +70,64 @@ def process_chunk(
     """
     Process a single chunk of the file and return word counts.
     """
+    t0 = time.time()
+    print(f"[pretok] chunk {start}-{end} enter", flush=True)
+
     word_counts = defaultdict(int)
     special_tokens_set = set(special_tokens)
 
-    # Compile regex pattern locally for each process
     gpt2_pat = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
+    t_read_start = time.time()
     with open(input_path, "rb") as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
             chunk_bytes = mm[start:end]
             text = chunk_bytes.decode("utf-8", errors="ignore")
+    t_read_end = time.time()
 
-    # Pre-tokenization
+    # print(
+    #     f"[pretok] chunk {start}-{end} after read, bytes={end - start}, "
+    #     f"time={t_read_end - t_read_start:.2f}s",
+    #     flush=True,
+    # )
+
+    t_split_start = time.time()
     if special_tokens:
         pattern = "|".join(re.escape(token) for token in special_tokens)
         parts = re.split(f"({pattern})", text)
     else:
         parts = [text]
+    t_split_end = time.time()
+
+    # print(
+    #     f"[pretok] chunk {start}-{end} after split, parts={len(parts)}, "
+    #     f"time={t_split_end - t_split_start:.2f}s",
+    #     flush=True,
+    # )
+
+    t_regex_start = time.time()
 
     for part in parts:
         if part in special_tokens_set:
             continue
-        words = gpt2_pat.findall(part)
-        for word in words:
-            word_counts[word.encode("utf-8")] += 1
+        
+        # 用 finditer 减少内存开销
+        for match in gpt2_pat.finditer(part):
+            word = match.group()
+            word_counts[encode_word(word)] += 1  # 使用缓存函数
+    
+    t_regex_end = time.time()
 
+    total = t_regex_end - t0
+    print(
+        f"[pretok] chunk {start}-{end} done, "
+        f"words={len(word_counts)}, "
+        f"read={t_read_end - t_read_start:.2f}s "
+        f"split={t_split_end - t_split_start:.2f}s "
+        f"regex={t_regex_end - t_regex_start:.2f}s "
+        f"total={total:.2f}s",
+        flush=True,
+    )
     return word_counts
 
 
@@ -96,32 +135,39 @@ def get_word_counts_parallel(input_path: str, special_tokens: list[str], num_pro
     """
     Parallelly count words in a file using multiple processes.
     """
-    # Determine split token
-    split_token = b"<|endoftext|>"
-    if special_tokens and "<|endoftext|>" in special_tokens:
-        split_token = b"<|endoftext|>"
-    elif special_tokens:
-        split_token = special_tokens[0].encode("utf-8")
-    else:
-        split_token = b"\n"
+    start_time = time.time()
 
-    # Find boundaries
-    # 二进制模式读取
+    split_token = (
+        b"<|endoftext|>" if "<|endoftext|>" in special_tokens else
+        special_tokens[0].encode("utf-8") if special_tokens else
+        b"\n"
+    )
+
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, split_token)
+    print(f"[pretok] boundaries found: {len(boundaries) - 1} chunks", flush=True)
 
-    # Process chunks in parallel
-    with multiprocessing.Pool(processes=num_processes) as pool:
-        process_func = functools.partial(process_chunk, input_path=input_path, special_tokens=special_tokens)
+    chunk_args = list(zip(boundaries[:-1], boundaries[1:]))
+    
+    chunks_per_batch = 24
 
-        chunk_args = list(zip(boundaries[:-1], boundaries[1:]))
-        results = pool.starmap(process_func, chunk_args)
-
-    # Aggregate results
+    # 分批处理
     total_word_counts = defaultdict(int)
-    for res in results:
-        for word, count in res.items():
-            total_word_counts[word] += count
+    for i in range(0, len(chunk_args), chunks_per_batch):
+        batch_args = chunk_args[i:i+chunks_per_batch]
+        print(f"[pretok] 处理批次 {i//chunks_per_batch + 1}/{(len(chunk_args)+chunks_per_batch-1)//chunks_per_batch}: {len(batch_args)}个chunks")
+        
+        with multiprocessing.Pool(processes=min(num_processes, len(batch_args))) as pool:
+            process_func = functools.partial(process_chunk, input_path=input_path, special_tokens=special_tokens)
+            results = pool.starmap(process_func, batch_args)
+            
+        # 合并结果
+        for res in results:
+            for word, count in res.items():
+                total_word_counts[word] += count
+
+    total_elapsed = time.time() - start_time
+    print(f"[pretok] total unique words={len(total_word_counts)}, total time={total_elapsed:.2f}s", flush=True)
 
     return total_word_counts
 

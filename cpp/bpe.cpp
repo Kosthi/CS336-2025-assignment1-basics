@@ -16,6 +16,7 @@ namespace py = pybind11;
 #include <assert.h>
 #include <queue>
 #include <omp.h>
+#include <chrono>
 
 namespace bpe {
     // 自定义哈希函数，用于将std::pair<int, int>作为unordered_map的键
@@ -82,10 +83,11 @@ namespace bpe {
             std::vector<std::pair<size_t, size_t> >, // (word_idx, position)
             PairHash> pair_positions;
 
-        // 用于并行处理的线程本地数据结构
         struct ThreadLocal {
-            // 每个线程本地统计的pair频率
             std::unordered_map<std::pair<int, int>, int, PairHash> local_counts;
+            std::unordered_map<std::pair<int, int>,
+                std::vector<std::pair<size_t, size_t> >,
+                PairHash> local_positions;
         };
 
     public:
@@ -98,24 +100,24 @@ namespace bpe {
                 vocab[i] = Bytes(1, static_cast<char>(i));
             }
 
-            // 将单词转换为token序列
-            words.reserve(distinct_words.size());
-            word_counts = counts; // 复制单词频率
+            std::cout << "BPETrainer: distinct_words size = " << distinct_words.size() << std::endl;
 
-            for (const auto &word: distinct_words) {
-                std::vector<int> token_ids;
+            words.resize(distinct_words.size());
+            word_counts = counts;
+
+#pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < distinct_words.size(); ++i) {
+                const auto &word = distinct_words[i];
+                auto &token_ids = words[i];
                 token_ids.reserve(word.size());
-
-                // 将每个字符转换为对应的token ID（0-255）
                 for (char ch: word) {
                     token_ids.emplace_back(static_cast<unsigned char>(ch));
                 }
-
-                words.emplace_back(std::move(token_ids));
             }
 
-            // 构建初始的pair统计信息
-            // single_build_initial_counts();
+            std::cout << "BPETrainer: converted words to token ids" << std::endl;
+
+            std::cout << "BPETrainer: start build_initial_counts" << std::endl;
             build_initial_counts();
         }
 
@@ -190,29 +192,35 @@ namespace bpe {
                     empty_queue{PairComparator(&vocab)};
             pair_queue.swap(empty_queue);
 
-            // 使用OpenMP进行并行计数
+            int hw_threads = omp_get_num_procs();
+            int desired_threads = hw_threads;
+            if (desired_threads > 24) desired_threads = 24;
+            if (desired_threads < 1) desired_threads = 1;
+            omp_set_num_threads(desired_threads);
+
             std::vector<ThreadLocal> thread_locals;
 
 #pragma omp parallel
             {
-                // 单线程执行：分配线程本地存储空间
 #pragma omp single
-                thread_locals.resize(omp_get_num_threads());
+                {
+                    int actual_threads = omp_get_num_threads();
+                    std::cout << "build_initial_counts using " << actual_threads << " threads" << std::endl;
+                    thread_locals.resize(actual_threads);
+                }
 
-                // 获取当前线程的本地存储
                 ThreadLocal &local = thread_locals[omp_get_thread_num()];
                 local.local_counts.clear();
+                local.local_positions.clear();
 
-                // 并行处理所有单词
 #pragma omp for schedule(static)
                 for (size_t i = 0; i < words.size(); ++i) {
                     const auto &word = words[i];
-                    int count = word_counts[i]; // 当前单词的频率
+                    int count = word_counts[i];
 
-                    if (word.empty()) continue; // 跳过空单词
+                    if (word.empty()) continue;
 
                     int curr = -1;
-                    // 找到第一个有效token
                     for (size_t k = 0; k < word.size(); ++k) {
                         if (word[k] != -1) {
                             curr = k;
@@ -220,33 +228,30 @@ namespace bpe {
                         }
                     }
 
-                    if (curr == -1) continue; // 没有有效token
+                    if (curr == -1) continue;
 
-                    // 遍历单词中的所有相邻token对
                     while (true) {
                         int next = get_next_pos(word, curr);
-                        if (next == -1) break; // 没有下一个token
+                        if (next == -1) break;
 
                         std::pair<int, int> p = {word[curr], word[next]};
 
-                        // 在线程本地统计中增加该pair的频率
                         local.local_counts[p] += count;
+                        local.local_positions[p].emplace_back(i, curr);
 
-                        // 临界区：记录该pair的位置信息
-#pragma omp critical
-                        {
-                            pair_positions[p].emplace_back(i, curr);
-                        }
-
-                        curr = next; // 移动到下一个token
+                        curr = next;
                     }
                 }
 
-                // 合并线程本地的统计到全局统计
 #pragma omp critical
                 {
                     for (const auto &entry: local.local_counts) {
                         pair_counts[entry.first] += entry.second;
+                    }
+                    for (auto &entry: local.local_positions) {
+                        auto &vec = pair_positions[entry.first];
+                        auto &local_vec = entry.second;
+                        vec.insert(vec.end(), local_vec.begin(), local_vec.end());
                     }
                 }
             }
@@ -352,6 +357,12 @@ namespace bpe {
             // 注意：需要确保vocab_size大于特殊token的数量
             size_t target_base_vocab_size = vocab_size - special_tokens.size();
 
+            auto start_time = std::chrono::steady_clock::now();
+            int merge_count = 0;
+
+            std::cout << "BPETrainer::train enter, target_base_vocab_size=" << target_base_vocab_size
+                      << " current_vocab_size=" << vocab.size() << std::endl;
+
             // 持续合并直到达到目标词汇表大小
             while (vocab.size() < target_base_vocab_size) {
                 // 如果优先级队列为空，重新构建统计信息
@@ -389,6 +400,15 @@ namespace bpe {
                 // 合并最佳的pair
                 int new_id = next_id++; // 分配新的token ID
                 merge_pair(best_info.pair, new_id, merges);
+
+                ++merge_count;
+                if (merge_count % 1000 == 0) {
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+                    std::cout << "[bpe] merges=" << merge_count
+                              << " vocab_size=" << vocab.size()
+                              << " elapsed=" << elapsed << "s" << std::endl;
+                }
             }
 
             // 添加特殊tokens到词汇表
