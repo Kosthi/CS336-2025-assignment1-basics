@@ -7,6 +7,7 @@ import multiprocessing
 from typing import IO, Any, BinaryIO
 import time
 from cs336_basics.pretokenization import get_word_counts_parallel
+from cs336_basics.BPETokenizer import BPETokenizer
 
 import numpy.typing as npt
 import torch
@@ -564,7 +565,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    return BPETokenizer(vocab, merges, special_tokens)
 
 
 # Pybind11 setup

@@ -138,7 +138,7 @@ def test_train_bpe_tinystories(snapshot):
     input_path = DATA_PATH / "TinyStoriesV2-GPT4-train.txt"
 
     # input_path = HOST_DATA_PATH / "owt_train.txt"
-    
+
     print("=" * 60)
     print("🧪 开始 BPE 训练测试")
     print(f"📁 输入文件: {input_path}")

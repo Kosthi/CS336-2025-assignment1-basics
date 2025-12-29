@@ -8,6 +8,7 @@ import time
 import mmap
 from functools import lru_cache
 
+
 def find_chunk_boundaries(
     file: BinaryIO,
     desired_num_chunks: int,
@@ -53,6 +54,7 @@ def find_chunk_boundaries(
 
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
+
 
 # 在 process_chunk 函数内部顶部添加
 @lru_cache(maxsize=65536)
@@ -110,12 +112,12 @@ def process_chunk(
     for part in parts:
         if part in special_tokens_set:
             continue
-        
+
         # 用 finditer 减少内存开销
         for match in gpt2_pat.finditer(part):
             word = match.group()
             word_counts[encode_word(word)] += 1  # 使用缓存函数
-    
+
     t_regex_end = time.time()
 
     total = t_regex_end - t0
@@ -138,9 +140,11 @@ def get_word_counts_parallel(input_path: str, special_tokens: list[str], num_pro
     start_time = time.time()
 
     split_token = (
-        b"<|endoftext|>" if "<|endoftext|>" in special_tokens else
-        special_tokens[0].encode("utf-8") if special_tokens else
-        b"\n"
+        b"<|endoftext|>"
+        if "<|endoftext|>" in special_tokens
+        else special_tokens[0].encode("utf-8")
+        if special_tokens
+        else b"\n"
     )
 
     with open(input_path, "rb") as f:
@@ -148,19 +152,21 @@ def get_word_counts_parallel(input_path: str, special_tokens: list[str], num_pro
     print(f"[pretok] boundaries found: {len(boundaries) - 1} chunks", flush=True)
 
     chunk_args = list(zip(boundaries[:-1], boundaries[1:]))
-    
+
     chunks_per_batch = 24
 
     # 分批处理
     total_word_counts = defaultdict(int)
     for i in range(0, len(chunk_args), chunks_per_batch):
-        batch_args = chunk_args[i:i+chunks_per_batch]
-        print(f"[pretok] 处理批次 {i//chunks_per_batch + 1}/{(len(chunk_args)+chunks_per_batch-1)//chunks_per_batch}: {len(batch_args)}个chunks")
-        
+        batch_args = chunk_args[i : i + chunks_per_batch]
+        print(
+            f"[pretok] 处理批次 {i // chunks_per_batch + 1}/{(len(chunk_args) + chunks_per_batch - 1) // chunks_per_batch}: {len(batch_args)}个chunks"
+        )
+
         with multiprocessing.Pool(processes=min(num_processes, len(batch_args))) as pool:
             process_func = functools.partial(process_chunk, input_path=input_path, special_tokens=special_tokens)
             results = pool.starmap(process_func, batch_args)
-            
+
         # 合并结果
         for res in results:
             for word, count in res.items():

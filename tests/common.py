@@ -7,6 +7,7 @@ FIXTURES_PATH = pathlib.Path(__file__).resolve().parent / "fixtures"
 DATA_PATH = pathlib.Path(__file__).resolve().parent.parent / "data"
 HOST_DATA_PATH = pathlib.Path("/root/autodl-tmp")
 
+
 @lru_cache
 def gpt2_bytes_to_unicode() -> dict[int, str]:
     """
