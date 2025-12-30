@@ -168,3 +168,10 @@ cython_debug/
 data/
 *test_results/
 **/cmake-build-*/
+
+chars_per_token.png
+compression_analysis.png
+compression_results.json
+
+sampled_owt.txt
+sampled_tinystories.txt
