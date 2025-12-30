@@ -116,15 +116,14 @@ def save_bpe_results(vocab, merges, output_dir, name):
     with open(merges_file, "w", encoding="utf-8") as f:
         for t1, t2 in merges:
 
-            def to_str(t):
+            def to_str_for_file(t):
                 if isinstance(t, bytes):
-                    try:
-                        return t.decode("utf-8")
-                    except UnicodeDecodeError:
-                        return t.hex()
-                return str(t)
+                    s = t.decode("utf-8", errors="replace")
+                else:
+                    s = str(t)
+                return json.dumps(s, ensure_ascii=False)
 
-            f.write(f"{to_str(t1)} {to_str(t2)}\n")
+            f.write(f"{to_str_for_file(t1)}\t{to_str_for_file(t2)}\n")
 
     return vocab_file, merges_file
 

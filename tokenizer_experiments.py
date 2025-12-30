@@ -1,6 +1,7 @@
 import json
 import os
 import math
+import time
 from typing import Dict, List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,11 +18,21 @@ def get_tokenizer_from_vocab_merges_path(
         vocabs = json.load(vocab_f)
 
     bpe_merges = []
-    with open(merges_path) as f:
-        for line in f:
-            cleaned_line = line.rstrip()
-            if cleaned_line and len(cleaned_line.split(" ")) == 2:
-                bpe_merges.append(tuple(cleaned_line.split(" ")))
+    with open(merges_path, encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.rstrip("\n")
+            if not line:
+                continue
+
+            if "\t" in line:
+                left, right = line.split("\t", 1)
+                merge_token_1 = json.loads(left)
+                merge_token_2 = json.loads(right)
+                bpe_merges.append((merge_token_1, merge_token_2))
+            else:
+                parts = line.rsplit(" ", 1)
+                if len(parts) == 2:
+                    bpe_merges.append(tuple(parts))
 
     vocab = {vocab_index: vocab_item.encode("utf-8") for vocab_index, vocab_item in vocabs.items()}
 
@@ -89,6 +100,8 @@ def calculate_compression_ratio(
 
     document_stats = []
 
+    encode_start = time.time()
+
     for i, doc in enumerate(documents):
         # 计算原始字节数（UTF-8编码）
         doc_bytes = len(doc.encode("utf-8"))
@@ -121,6 +134,9 @@ def calculate_compression_ratio(
             print(f"  文档 {i + 1}: {doc_chars} 字符, {doc_bytes} 字节, {num_tokens} 令牌")
             print(f"      压缩率: {doc_ratio:.2f} 字节/令牌")
 
+    encode_end = time.time()
+    encode_time = max(encode_end - encode_start, 1e-9)
+
     # 计算总体统计
     if total_tokens > 0:
         overall_ratio = total_bytes / total_tokens
@@ -136,6 +152,9 @@ def calculate_compression_ratio(
         avg_bits_per_token = math.log2(vocab_size)
         avg_bytes_per_token_ideal = avg_bits_per_token / 8
 
+        bytes_per_second = total_bytes / encode_time
+        tokens_per_second = total_tokens / encode_time
+
         print(f"\n总体统计 ({tokenizer_name} on {dataset_name}):")
         print(f"  总文档数: {len(documents)}")
         print(f"  总字符数: {total_chars}")
@@ -146,6 +165,8 @@ def calculate_compression_ratio(
         print(f"  压缩率标准差: {std_dev:.2f}")
         print(f"  理论最小字节/令牌 (基于词汇表大小 {vocab_size}): {avg_bytes_per_token_ideal:.2f}")
         print(f"  实际效率: {(avg_bytes_per_token_ideal / overall_ratio * 100):.1f}%")
+        print(f"  编码时间: {encode_time:.2f} 秒")
+        print(f"  吞吐率: {bytes_per_second:,.1f} 字节/秒, {tokens_per_second:,.1f} 令牌/秒")
 
         return {
             "tokenizer_name": tokenizer_name,
@@ -160,6 +181,9 @@ def calculate_compression_ratio(
             "vocab_size": vocab_size,
             "ideal_bytes_per_token": avg_bytes_per_token_ideal,
             "efficiency_percentage": avg_bytes_per_token_ideal / overall_ratio * 100,
+            "encode_time_seconds": encode_time,
+            "throughput_bytes_per_second": bytes_per_second,
+            "throughput_tokens_per_second": tokens_per_second,
             "document_stats": document_stats,
         }
     else:
@@ -194,12 +218,14 @@ def plot_compression_results(results: List[Dict]):
     x = np.arange(len(labels))
     width = 0.35
 
-    bars1 = ax1.bar(x - width / 2, bytes_per_token, width, label="实际字节/令牌", color="skyblue")
-    bars2 = ax1.bar(x + width / 2, ideal_bytes_per_token, width, label="理论最小字节/令牌", color="lightcoral")
+    bars1 = ax1.bar(x - width / 2, bytes_per_token, width, label="Actual bytes/token", color="skyblue")
+    bars2 = ax1.bar(
+        x + width / 2, ideal_bytes_per_token, width, label="Theoretical min bytes/token", color="lightcoral"
+    )
 
     ax1.set_xlabel("Tokenizer / Dataset")
-    ax1.set_ylabel("字节/令牌")
-    ax1.set_title("实际 vs 理论压缩率")
+    ax1.set_ylabel("Bytes per token")
+    ax1.set_title("Actual vs theoretical compression ratio")
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, rotation=45, ha="right")
     ax1.legend()
@@ -220,12 +246,14 @@ def plot_compression_results(results: List[Dict]):
 
     # 2. 效率百分比
     ax2 = axes[0, 1]
-    bars = ax2.bar(labels, efficiency, color="lightgreen")
+    x2 = np.arange(len(labels))
+    bars = ax2.bar(x2, efficiency, color="lightgreen")
     ax2.set_xlabel("Tokenizer / Dataset")
-    ax2.set_ylabel("效率 (%)")
-    ax2.set_title("编码效率 (实际/理论)")
+    ax2.set_ylabel("Efficiency (%)")
+    ax2.set_title("Encoding efficiency (actual/theoretical)")
+    ax2.set_xticks(x2)
     ax2.set_xticklabels(labels, rotation=45, ha="right")
-    ax2.axhline(y=100, color="r", linestyle="--", alpha=0.7, label="理想效率 (100%)")
+    ax2.axhline(y=100, color="r", linestyle="--", alpha=0.7, label="Ideal efficiency (100%)")
     ax2.legend()
 
     # 添加数值标签
@@ -244,9 +272,9 @@ def plot_compression_results(results: List[Dict]):
     # 3. 词汇表大小 vs 压缩率
     ax3 = axes[1, 0]
     ax3.scatter(vocab_sizes, bytes_per_token, s=100, alpha=0.7)
-    ax3.set_xlabel("词汇表大小")
-    ax3.set_ylabel("字节/令牌")
-    ax3.set_title("词汇表大小 vs 压缩率")
+    ax3.set_xlabel("Vocabulary size")
+    ax3.set_ylabel("Bytes per token")
+    ax3.set_title("Vocabulary size vs compression ratio")
     ax3.grid(True, alpha=0.3)
 
     # 添加标签
@@ -284,10 +312,10 @@ def plot_compression_results(results: List[Dict]):
             box_data.append(ratios)
             box_labels.append(result["tokenizer_name"][:15])
 
-    ax4.boxplot(box_data, labels=box_labels)
+    ax4.boxplot(box_data, tick_labels=box_labels)
     ax4.set_xlabel("Tokenizer")
-    ax4.set_ylabel("字节/令牌")
-    ax4.set_title("文档级压缩率分布")
+    ax4.set_ylabel("Bytes per token")
+    ax4.set_title("Per-document compression ratio distribution")
     ax4.set_xticklabels(box_labels, rotation=45, ha="right")
     ax4.grid(True, alpha=0.3)
 
@@ -302,8 +330,8 @@ def plot_compression_results(results: List[Dict]):
 
     bars = plt.bar(labels, chars_per_token, color="lightblue")
     plt.xlabel("Tokenizer / Dataset")
-    plt.ylabel("字符/令牌")
-    plt.title("平均字符数 per 令牌")
+    plt.ylabel("Characters per token")
+    plt.title("Average characters per token")
     plt.xticks(rotation=45, ha="right")
     plt.grid(True, alpha=0.3, axis="y")
 
@@ -527,7 +555,7 @@ def main():
             ts_tokenizer,
             owt_documents[:5],  # 只测试前5个文档
             "TinyStories-10K",
-            "OpenWebText (子集)",
+            "OpenWebText (subset)",
         )
         if ts_on_owt:
             results.append(ts_on_owt)
@@ -567,6 +595,11 @@ def main():
             print(f"  • 压缩率: {result['bytes_per_token']:.2f} 字节/令牌")
             print(f"  • 平均每个令牌编码: {result['chars_per_token']:.2f} 个字符")
             print(f"  • 编码效率: {result['efficiency_percentage']:.1f}%")
+            if "throughput_bytes_per_second" in result and "throughput_tokens_per_second" in result:
+                print(
+                    f"  • 吞吐率: {result['throughput_bytes_per_second']:,.1f} 字节/秒, "
+                    f"{result['throughput_tokens_per_second']:,.1f} 令牌/秒"
+                )
 
             # 解释含义
             if result["bytes_per_token"] < 1.0:
