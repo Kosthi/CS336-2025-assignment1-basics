@@ -9,6 +9,7 @@ import time
 from cs336_basics.pretokenization import get_word_counts_parallel
 from cs336_basics.BPETokenizer import BPETokenizer
 from cs336_basics.Linear import Linear
+from cs336_basics.Embedding import Embedding
 
 import numpy.typing as npt
 import torch
@@ -62,8 +63,12 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
+    state_dict = {"W": weights}
 
-    raise NotImplementedError
+    embedding_layer = Embedding(vocab_size, d_model)
+    embedding_layer.load_state_dict(state_dict)
+
+    return embedding_layer(token_ids)
 
 
 def run_swiglu(
