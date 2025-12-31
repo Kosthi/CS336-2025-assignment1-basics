@@ -10,6 +10,7 @@ from cs336_basics.pretokenization import get_word_counts_parallel
 from cs336_basics.BPETokenizer import BPETokenizer
 from cs336_basics.Linear import Linear
 from cs336_basics.Embedding import Embedding
+from cs336_basics.RMSNorm import RMSNorm
 
 import numpy.typing as npt
 import torch
@@ -395,7 +396,10 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    state_dict = {"W": weights}
+    rmsnorm_layer = RMSNorm(d_model, eps)
+    rmsnorm_layer.load_state_dict(state_dict)
+    return rmsnorm_layer(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
