@@ -1,7 +1,7 @@
 import torch
 
 
-def Softmax(x: torch.Tensor, dim: int):
+def softmax(x: torch.Tensor, dim: int):
     """
     Args:
         x: 输入张量，形状为 (...,)

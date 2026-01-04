@@ -13,7 +13,8 @@ from cs336_basics.Embedding import Embedding
 from cs336_basics.RMSNorm import RMSNorm
 from cs336_basics.SwiGLU import SwiGLU
 from cs336_basics.RotaryPositionalEmbedding import RotaryPositionalEmbedding
-from cs336_basics.Softmax import Softmax
+from cs336_basics.softmax import softmax
+from cs336_basics.attention import scaled_dot_product_attention
 
 import numpy.typing as npt
 import torch
@@ -130,7 +131,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -461,8 +462,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    softmax = Softmax(dim)
-    return softmax(in_features)
+    return softmax(in_features, dim)
 
 
 def run_cross_entropy(
