@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 from .Linear import Linear
 from .attention import scaled_dot_product_attention
+from .RotaryPositionalEmbedding import RotaryPositionalEmbedding
 
 
 class CausalMultiHeadSelfAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(self, d_model: int, num_heads: int, theta: float = None, max_seq_len: int = None, device=None):
         """
         构建线性变换模块。
         参数：
@@ -25,7 +26,13 @@ class CausalMultiHeadSelfAttention(nn.Module):
         self.W_V = Linear(in_features=d_model, out_features=d_model)
         self.W_O = Linear(in_features=d_model, out_features=d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 是否使用 rope
+        if theta is not None:
+            self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len, device=device)
+        else:
+            self.rope = None
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
         """将线性变换应用于输入。"""
         batch_size, seq_len, _ = x.shape
 
@@ -52,11 +59,17 @@ class CausalMultiHeadSelfAttention(nn.Module):
         K = K.transpose(1, 2)
         V = V.transpose(1, 2)
 
-        # 创建因果掩码，False 表示不可关注
+        # 可选，应用 RoPE 到 Q 和 K
+        if self.rope:
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
+
+        # 4.创建因果掩码，False 表示不可关注
         mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device), diagonal=0).bool()
 
         # (batch, num_heads, seq_len, d_k)
         # (batch_size, ..., d_v)
+        # 5.计算注意力
         attn_output = scaled_dot_product_attention(Q, K, V, mask)
 
         # 6. 合并多头（Concat）
