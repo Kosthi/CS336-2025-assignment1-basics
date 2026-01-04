@@ -9,6 +9,6 @@ def softmax(x: torch.Tensor, dim: int):
     Returns:
         输出张量，形状为 (...,)
     """
-    weights = torch.exp(x - torch.max(x))
-    t = torch.sum(weights, dim=dim, keepdim=True)
-    return weights / t
+    weights = torch.exp(x - torch.max(x, dim=dim, keepdim=True).values)
+    total = torch.sum(weights, dim=dim, keepdim=True)
+    return weights / total
