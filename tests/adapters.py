@@ -17,6 +17,7 @@ from cs336_basics.softmax import softmax
 from cs336_basics.attention import scaled_dot_product_attention
 from cs336_basics.CausalMultiHeadSelfAttention import CausalMultiHeadSelfAttention
 from cs336_basics.transformer_block import TransformerBlock
+from cs336_basics.transformer_lm import TransformerLM
 
 import numpy.typing as npt
 import torch
@@ -406,7 +407,27 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+
+    state_dict = {
+        "embedding.W": weights["token_embeddings.weight"],
+        "rms_norm.W": weights["ln_final.weight"],
+        "linear.W": weights["lm_head.weight"],
+    }
+
+    for layer in range(num_layers):
+        state_dict[f"blocks.{layer}.attn.W_Q.W"] = weights[f"layers.{layer}.attn.q_proj.weight"]
+        state_dict[f"blocks.{layer}.attn.W_K.W"] = weights[f"layers.{layer}.attn.k_proj.weight"]
+        state_dict[f"blocks.{layer}.attn.W_V.W"] = weights[f"layers.{layer}.attn.v_proj.weight"]
+        state_dict[f"blocks.{layer}.attn.W_O.W"] = weights[f"layers.{layer}.attn.output_proj.weight"]
+        state_dict[f"blocks.{layer}.rms_norm1.W"] = weights[f"layers.{layer}.ln1.weight"]
+        state_dict[f"blocks.{layer}.rms_norm2.W"] = weights[f"layers.{layer}.ln2.weight"]
+        state_dict[f"blocks.{layer}.swi_glu.W1.W"] = weights[f"layers.{layer}.ffn.w1.weight"]
+        state_dict[f"blocks.{layer}.swi_glu.W2.W"] = weights[f"layers.{layer}.ffn.w2.weight"]
+        state_dict[f"blocks.{layer}.swi_glu.W3.W"] = weights[f"layers.{layer}.ffn.w3.weight"]
+
+    transformerLM = TransformerLM(vocab_size, context_length, d_model, num_layers, num_heads, d_ff, rope_theta)
+    transformerLM.load_state_dict(state_dict)
+    return transformerLM(in_indices)
 
 
 def run_rmsnorm(
