@@ -22,7 +22,6 @@ class RMSNorm(nn.Module):
         init.trunc_normal_(W, mean=0.0, std=0.02, a=-0.04, b=0.04)
         # 将权重包装为 nn.Parameter
         self.W = nn.Parameter(W)
-        print(self.W.shape)
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
