@@ -6,7 +6,7 @@ import os
 def analyze_vocab(vocab_file):
     """分析词汇表中最长的令牌"""
     # 1. 加载词汇表
-    with open(vocab_file, "r", encoding="utf-8") as f:
+    with open(vocab_file, encoding="utf-8") as f:
         vocab = json.load(f)
 
     print(f"词汇表总大小: {len(vocab)} 个令牌")
@@ -38,7 +38,7 @@ def analyze_vocab(vocab_file):
         # 将字符串转换为字节（假设是UTF-8编码）
         try:
             token_bytes = token_str.encode("utf-8", errors="replace")
-        except:
+        except Exception:
             # 如果 token_str 不是字符串，跳过
             continue
 
@@ -65,14 +65,14 @@ def analyze_vocab(vocab_file):
                 # 尝试解码显示
                 decoded = token_str.encode("utf-8").decode("utf-8", errors="replace")
                 print(f"  ID: {token_id:6d} | 字节长度: {token_len:3d} | 内容: {repr(decoded)}")
-            except:
+            except Exception:
                 # 如果 token_id 不是整数，使用字符串显示
                 print(f"  ID: {str(token_id):6s} | 字节长度: {token_len:3d} | 内容: [无法解码]")
     else:
         print("没有找到任何令牌")
 
     # 5. 分析长度分布
-    print(f"\n令牌长度分布:")
+    print("\n令牌长度分布:")
     for length in sorted(token_lengths.keys()):
         count = len(token_lengths[length])
         percentage = (count / len(vocab)) * 100 if vocab else 0
@@ -89,14 +89,14 @@ def analyze_vocab(vocab_file):
                     if len(decoded) > 20:
                         decoded = decoded[:20] + "..."
                     sample_display.append(repr(decoded))
-                except:
+                except Exception:
                     sample_display.append("[binary]")
 
             print(f"  长度 {length:2d} 字节: {count:6d} 个 ({percentage:5.1f}%) | 样本: {', '.join(sample_display)}")
 
     # 6. 详细分析最长令牌
     if max_length <= 10:  # 如果最大长度很小，分析所有长度的令牌
-        print(f"\n详细分析所有令牌:")
+        print("\n详细分析所有令牌:")
 
         # 按长度分组
         length_groups = {}
@@ -110,7 +110,7 @@ def analyze_vocab(vocab_file):
                 try:
                     decoded = token.encode("utf-8").decode("utf-8", errors="replace")
                     print(f"  {i + 1}. {repr(decoded)}")
-                except:
+                except Exception:
                     print(f"  {i + 1}. [二进制数据]")
 
                 # 显示原始字节
@@ -133,7 +133,7 @@ if os.path.exists(vocab_file):
     print(f"  1. 词汇表大小: {len(length_dist)} 种不同长度的令牌")
     print(f"  2. 最长令牌: {max_len} 字节")
     print(f"  3. 最长令牌示例: {longest_tokens[0][0] if longest_tokens else '无'}")
-    print(f"  4. 令牌长度分布:")
+    print("  4. 令牌长度分布:")
 
     # 计算统计信息
     all_lengths = []
@@ -147,11 +147,11 @@ if os.path.exists(vocab_file):
         print(f"     中位数长度: {median_length} 字节")
 
         # 检查是否有超过10字节的令牌
-        long_tokens = [l for l in all_lengths if l > 10]
+        long_tokens = [length_val for length_val in all_lengths if length_val > 10]
         if long_tokens:
             print(f"     警告: 有 {len(long_tokens)} 个令牌长度超过10字节")
         else:
-            print(f"     所有令牌长度 ≤ 10 字节")
+            print("     所有令牌长度 ≤ 10 字节")
 
     print("=" * 80)
 else:

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
-from typing import Tuple, Union
 import random
+from typing import Literal
 
 
 class DataLoader:
@@ -11,11 +11,11 @@ class DataLoader:
 
     def __init__(
         self,
-        dataset: Union[str, np.ndarray],  # 修改：支持直接传入numpy数组
+        dataset: str | np.ndarray,  # 修改：支持直接传入numpy数组
         batch_size: int,
         context_length: int,
         device: str = "cpu",
-        mmap_mode: str = "r",
+        mmap_mode: Literal["r+", "r", "w+", "c"] = "r",
         dtype: np.dtype = np.uint16,
     ):
         """
@@ -35,9 +35,10 @@ class DataLoader:
 
         # 根据data类型决定如何加载数据
         if isinstance(dataset, str):
-            # 如果是文件路径，使用内存映射加载
-            # print(f"从文件加载数据: {dataset}")
-            self.data = np.load(dataset, mmap_mode=mmap_mode).astype(dtype)
+            if dataset.endswith(".bin"):
+                self.data = np.memmap(dataset, dtype=dtype, mode=mmap_mode)
+            else:
+                self.data = np.load(dataset, mmap_mode=mmap_mode).astype(dtype, copy=False)
             self.data_source = "file"
         elif isinstance(dataset, np.ndarray):
             # 如果直接是numpy数组，直接使用
@@ -45,7 +46,7 @@ class DataLoader:
             self.data = dataset.astype(dtype)
             self.data_source = "array"
         else:
-            raise TypeError(f"data必须是字符串（文件路径）或numpy数组，但得到 {type(data)}")
+            raise TypeError(f"dataset必须是字符串（文件路径）或numpy数组，但得到 {type(dataset)}")
 
         # 验证数据
         self._validate_data()
@@ -67,7 +68,7 @@ class DataLoader:
         if self.data.dtype not in [np.int32, np.int64, np.uint32, np.uint64, np.int16, np.uint16]:
             print(f"警告: 数据类型{self.data.dtype}可能不是整数类型")
 
-    def get_batch(self, seed: int = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_batch(self, seed: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """
         从token序列中随机采样一个批量。
 

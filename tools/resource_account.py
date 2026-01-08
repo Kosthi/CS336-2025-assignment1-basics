@@ -4,9 +4,7 @@ Transformer语言模型资源核算脚本
 用于计算GPT-2系列模型的参数量、内存占用和FLOPs
 """
 
-import math
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -31,7 +29,7 @@ class ResourceAccountant:
     """资源核算器"""
 
     @staticmethod
-    def calculate_parameters(config: ModelConfig) -> Dict[str, int]:
+    def calculate_parameters(config: ModelConfig) -> dict[str, int]:
         """计算模型各部分参数数量"""
         params = {}
 
@@ -70,7 +68,7 @@ class ResourceAccountant:
         return params
 
     @staticmethod
-    def calculate_flops(config: ModelConfig, include_embeddings: bool = False) -> Dict[str, float]:
+    def calculate_flops(config: ModelConfig, include_embeddings: bool = False) -> dict[str, float]:
         """
         计算前向传播的FLOPs
         矩阵乘法FLOPs公式: 2 × m × n × p
@@ -81,7 +79,6 @@ class ResourceAccountant:
         d_model = config.d_model
         d_ff = config.d_ff
         num_layers = config.num_layers
-        H = config.num_heads
         d_k = config.d_k
         d_v = d_k
         vocab_size = config.vocab_size
@@ -157,7 +154,7 @@ class ResourceAccountant:
         return flops
 
     @staticmethod
-    def calculate_memory_usage(params: Dict[str, int], precision_bits: int = 32) -> Dict[str, float]:
+    def calculate_memory_usage(params: dict[str, int], precision_bits: int = 32) -> dict[str, float]:
         """计算内存使用情况（以GB为单位）"""
         # 参数内存（以字节为单位）
         bytes_per_param = precision_bits / 8
@@ -173,7 +170,7 @@ class ResourceAccountant:
         return memory
 
     @staticmethod
-    def analyze_flops_distribution(flops: Dict[str, float]) -> Dict[str, float]:
+    def analyze_flops_distribution(flops: dict[str, float]) -> dict[str, float]:
         """分析FLOPs分布"""
         total = flops.get("total", 0)
         if total == 0:
@@ -192,7 +189,7 @@ class ResourceAccountant:
         print(f"\n{'=' * 60}")
         print(f"模型: {config.name}")
         print(f"{'=' * 60}")
-        print(f"配置:")
+        print("配置:")
         print(f"  层数: {config.num_layers}")
         print(f"  模型维度: {config.d_model}")
         print(f"  注意力头数: {config.num_heads}")
@@ -203,7 +200,7 @@ class ResourceAccountant:
         # 计算参数
         params = ResourceAccountant.calculate_parameters(config)
 
-        print(f"\n参数数量:")
+        print("\n参数数量:")
         print(f"  总参数: {params['total']:,}")
         print(f"  词嵌入: {params['token_embedding']:,} ({params['token_embedding'] / params['total'] * 100:.2f}%)")
         print(
@@ -249,7 +246,7 @@ class ResourceAccountant:
         # 分析FLOPs分布
         distribution = ResourceAccountant.analyze_flops_distribution(flops)
 
-        print(f"\nFLOPs分布:")
+        print("\nFLOPs分布:")
         print(f"  注意力Q/K/V投影: {distribution.get('layers_attn_qkv', 0):.2f}%")
         print(f"  点积注意力分数计算: {distribution.get('layers_attn_scores', 0):.2f}%")
         print(f"  点积注意力权重值计算: {distribution.get('layers_attn_wv', 0):.2f}%")
@@ -412,7 +409,7 @@ def main():
 
     # 2. 比较所有GPT-2模型
     print("\n2. GPT-2系列模型比较:")
-    results = compare_gpt2_models()
+    compare_gpt2_models()
 
     # 3. 分析上下文长度影响
     print("\n3. 上下文长度影响分析:")

@@ -1,12 +1,11 @@
 import json
-from typing import Dict, List, Tuple, Optional, Iterable, Iterator, Set
-from collections import defaultdict
+from collections.abc import Iterable, Iterator
 import regex as re
 
 
 class BPETokenizer:
     def __init__(
-        self, vocab: Dict[int, bytes], merges: List[Tuple[bytes, bytes]], special_tokens: Optional[List[str]] = None
+        self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None
     ):
         """
         从词汇表、合并序列和（可选）特殊令牌列表构建分词器。
@@ -46,7 +45,7 @@ class BPETokenizer:
         else:
             self.special_token_pattern = None
 
-    def _pre_tokenize(self, text: str) -> List[str]:
+    def _pre_tokenize(self, text: str) -> list[str]:
         """
         预分词函数：将文本分割成单词/子词
         """
@@ -83,7 +82,7 @@ class BPETokenizer:
 
         return res
 
-    def _apply_merges_to_token(self, token_bytes: bytes) -> List[bytes]:
+    def _apply_merges_to_token(self, token_bytes: bytes) -> list[bytes]:
         """
         对一个token的字节序列应用BPE合并操作。
 
@@ -128,7 +127,7 @@ class BPETokenizer:
 
         return tokens
 
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str) -> list[int]:
         """
         将输入文本编码为令牌ID序列。
 
@@ -236,7 +235,7 @@ class BPETokenizer:
         # 这可能会导致跨块边界的token，但在实际使用中应该很少发生
         return len(text)
 
-    def decode(self, ids: List[int]) -> str:
+    def decode(self, ids: list[int]) -> str:
         """
         将令牌ID序列解码为文本。
 

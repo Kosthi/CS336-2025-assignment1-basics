@@ -17,6 +17,11 @@ class TransformerLM(nn.Module):
         d_ff: int,
         rope_theta: float,
         device=None,
+        *,
+        use_rmsnorm: bool = True,
+        norm_style: str = "pre",
+        use_rope: bool = True,
+        ffn_type: str = "swiglu",
     ):
         """
         TransformerLM 是整个训练过程的封装，它把包含 Embedding、TransformerBlock、RMSNorm、Linear
@@ -40,12 +45,23 @@ class TransformerLM(nn.Module):
         # 创建 Transformer Block 列表
         self.blocks = nn.ModuleList(
             [
-                TransformerBlock(d_model, num_heads, d_ff, context_length, rope_theta, device=device)
+                TransformerBlock(
+                    d_model,
+                    num_heads,
+                    d_ff,
+                    context_length,
+                    rope_theta,
+                    device=device,
+                    use_rmsnorm=use_rmsnorm,
+                    norm_style=norm_style,
+                    use_rope=use_rope,
+                    ffn_type=ffn_type,
+                )
                 for _ in range(num_layers)
             ]
         )
 
-        self.rms_norm = RMSNorm(d_model, device=device)
+        self.rms_norm = RMSNorm(d_model, device=device) if use_rmsnorm else nn.Identity()
         self.linear = Linear(in_features=d_model, out_features=vocab_size, device=device)
 
     def forward(self, in_indices: torch.Tensor) -> torch.Tensor:

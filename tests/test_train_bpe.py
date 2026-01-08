@@ -2,10 +2,8 @@ import json
 import time
 
 from .adapters import run_train_bpe
-from .common import FIXTURES_PATH, gpt2_bytes_to_unicode, DATA_PATH, HOST_DATA_PATH
-import json
+from .common import FIXTURES_PATH, gpt2_bytes_to_unicode, DATA_PATH
 import os
-import time
 
 
 def test_train_bpe_speed():
@@ -141,8 +139,8 @@ def test_train_bpe_tinystories(snapshot):
     print("=" * 60)
     print("🧪 开始 BPE 训练测试")
     print(f"📁 输入文件: {input_path}")
-    print(f"📏 目标词汇表大小: 10000")
-    print(f"🏷️  特殊标记: ['<|endoftext|>']")
+    print("📏 目标词汇表大小: 10000")
+    print("🏷️  特殊标记: ['<|endoftext|>']")
     print("=" * 60)
 
     # 记录开始时间
@@ -160,12 +158,12 @@ def test_train_bpe_tinystories(snapshot):
     print(f"⏱️  BPE 训练完成，耗时: {training_time:.2f}秒")
 
     # 1. 打印基本信息
-    print(f"\n📊 训练结果统计:")
+    print("\n📊 训练结果统计:")
     print(f"   词汇表大小: {len(vocab)}")
     print(f"   合并规则数: {len(merges)}")
 
     # 2. 显示前10个高频 token
-    print(f"\n🏆 前10个高频 token:")
+    print("\n🏆 前10个高频 token:")
     # 将 vocab 转换为按 ID 排序的列表
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[0])
     for idx, token in sorted_vocab[:10]:
@@ -179,7 +177,7 @@ def test_train_bpe_tinystories(snapshot):
         print(f"   [{idx:4d}] {repr(token_str)}")
 
     # 3. 显示前10个合并规则
-    print(f"\n🔗 前10个合并规则:")
+    print("\n🔗 前10个合并规则:")
     for i, (token1, token2) in enumerate(merges[:10], 1):
         # 转换 token 为可读字符串
         def token_to_str(t):
@@ -195,7 +193,7 @@ def test_train_bpe_tinystories(snapshot):
         print(f"   {i:2d}. {repr(token1_str)} + {repr(token2_str)}")
 
     # 4. 检查特殊标记是否在词汇表中
-    print(f"\n✅ 特殊标记检查:")
+    print("\n✅ 特殊标记检查:")
     special_token = "<|endoftext|>"
     special_token_id = None
     for idx, token in vocab.items():
@@ -211,7 +209,7 @@ def test_train_bpe_tinystories(snapshot):
         print(f"   ⚠️  特殊标记 '{special_token}' 未在词汇表中找到！")
 
     # 5. 保存结果到文本文件
-    print(f"\n💾 保存结果到文件...")
+    print("\n💾 保存结果到文件...")
     output_dir = "test_results"
     vocab_file, merges_file = save_bpe_results(vocab, merges, output_dir, "tinystories")
 
@@ -226,7 +224,7 @@ def test_train_bpe_tinystories(snapshot):
         f.write(f"训练耗时: {training_time:.2f}秒\n\n")
 
         f.write(f"输入文件: {input_path}\n")
-        f.write(f"目标词汇表大小: 10000\n")
+        f.write("目标词汇表大小: 10000\n")
         f.write(f"实际词汇表大小: {len(vocab)}\n")
         f.write(f"合并规则数: {len(merges)}\n\n")
 
@@ -260,7 +258,7 @@ def test_train_bpe_tinystories(snapshot):
 
             f.write(f"  {i:3d}. {repr(safe_repr(token1))} + {repr(safe_repr(token2))}\n")
 
-        f.write(f"\n文件保存位置:\n")
+        f.write("\n文件保存位置:\n")
         f.write(f"  词汇表 (JSON): {vocab_file}\n")
         f.write(f"  合并规则: {merges_file}\n")
         f.write(f"  完整报告: {report_file}\n")

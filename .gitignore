@@ -175,3 +175,5 @@ compression_results.json
 
 sampled_owt.txt
 sampled_tinystories.txt
+
+runs/

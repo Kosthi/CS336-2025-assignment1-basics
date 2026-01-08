@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from typing import Optional
 import torch
 import math
 
@@ -11,7 +10,7 @@ class SGD(torch.optim.Optimizer):
         defaults = {"lr": lr}
         super().__init__(params, defaults)
 
-    def step(self, closure: Optional[Callable] = None):
+    def step(self, closure: Callable | None = None):
         loss = None
         if closure is not None:
             loss = closure()

@@ -27,7 +27,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
         # 计算频率矩阵：shape = (max_seq_len, d_k/2)
         # 公式: freqs = 1.0 / (theta ** (2 * i / d_k))
-        freqs = 1.0 / (theta**i)
+        freqs = torch.pow(torch.tensor(theta, device=device), -i)
 
         # 计算位置和频率的乘积：shape = (max_seq_len, d_k/2)
         # 每个位置m，每个维度i：m * theta^(-2i/d_k)
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     # 频率值（通常是theta^{-2i/d}形式）
     # freqs = torch.tensor([0.1, 0.2], dtype=torch.float32)  # d/2 = 2个频率
     i = torch.arange(0, d, 2).float() / d
-    freqs = 1.0 / (theta**i)
+    freqs = torch.pow(torch.tensor(theta), -i)
     # print(position)
     # print(i)
     # print(freqs)

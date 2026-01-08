@@ -2,7 +2,6 @@ import json
 import os
 import math
 import time
-from typing import Dict, List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from cs336_basics.BPETokenizer import BPETokenizer
@@ -50,7 +49,7 @@ def get_tokenizer_from_vocab_merges_path(
     return get_tokenizer(vocab, merges, special_tokens)
 
 
-def read_sampled_documents(filepath: str) -> List[str]:
+def read_sampled_documents(filepath: str) -> list[str]:
     """
     读取采样文档
 
@@ -62,7 +61,7 @@ def read_sampled_documents(filepath: str) -> List[str]:
     """
     documents = []
 
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         content = f.read()
 
     # 使用分隔符分割文档
@@ -78,8 +77,8 @@ def read_sampled_documents(filepath: str) -> List[str]:
 
 
 def calculate_compression_ratio(
-    tokenizer: BPETokenizer, documents: List[str], tokenizer_name: str, dataset_name: str
-) -> Dict:
+    tokenizer: BPETokenizer, documents: list[str], tokenizer_name: str, dataset_name: str
+) -> dict | None:
     """
     计算tokenizer在文档集上的压缩率
 
@@ -187,11 +186,11 @@ def calculate_compression_ratio(
             "document_stats": document_stats,
         }
     else:
-        print(f"错误: 没有成功编码任何令牌")
+        print("错误: 没有成功编码任何令牌")
         return None
 
 
-def plot_compression_results(results: List[Dict]):
+def plot_compression_results(results: list[dict]):
     """
     绘制压缩率结果图表
     """
@@ -352,7 +351,7 @@ def plot_compression_results(results: List[Dict]):
     plt.show()
 
 
-def save_detailed_results(results: List[Dict], output_file: str = "compression_results.json"):
+def save_detailed_results(results: list[dict], output_file: str = "compression_results.json"):
     """
     保存详细结果到JSON文件
     """
@@ -383,7 +382,7 @@ def save_detailed_results(results: List[Dict], output_file: str = "compression_r
     print(f"\n详细结果已保存到 {output_file}")
 
 
-def print_summary_table(results: List[Dict]):
+def print_summary_table(results: list[dict]):
     """
     打印结果汇总表格
     """
@@ -535,16 +534,16 @@ def main():
 
         # 3. 计算压缩率
         print("\n3. 计算压缩率...")
-        results = []
+        results: list[dict] = []
 
         # TinyStories tokenizer在TinyStories文档上
         ts_on_ts = calculate_compression_ratio(ts_tokenizer, ts_documents, "TinyStories-10K", "TinyStories")
-        if ts_on_ts:
+        if ts_on_ts is not None:
             results.append(ts_on_ts)
 
         # OpenWebText tokenizer在OpenWebText文档上
         owt_on_owt = calculate_compression_ratio(owt_tokenizer, owt_documents, "OpenWebText-32K", "OpenWebText")
-        if owt_on_owt:
+        if owt_on_owt is not None:
             results.append(owt_on_owt)
 
         # 可选：交叉测试
@@ -557,12 +556,12 @@ def main():
             "TinyStories-10K",
             "OpenWebText (subset)",
         )
-        if ts_on_owt:
+        if ts_on_owt is not None:
             results.append(ts_on_owt)
 
         # OpenWebText tokenizer在TinyStories文档上
         owt_on_ts = calculate_compression_ratio(owt_tokenizer, ts_documents, "OpenWebText-32K", "TinyStories")
-        if owt_on_ts:
+        if owt_on_ts is not None:
             results.append(owt_on_ts)
 
         # 4. 显示汇总结果
@@ -605,20 +604,20 @@ def main():
             if result["bytes_per_token"] < 1.0:
                 print(f"  • 含义: tokenizer实现了压缩效果，每个令牌平均编码 {1 / result['bytes_per_token']:.1f} 个字节")
             elif result["bytes_per_token"] < 4.0:
-                print(f"  • 含义: tokenizer编码效率良好，接近UTF-8字符的平均长度")
+                print("  • 含义: tokenizer编码效率良好，接近UTF-8字符的平均长度")
             else:
-                print(f"  • 含义: tokenizer编码效率较低，可能是由于词汇表较小或文本复杂性")
+                print("  • 含义: tokenizer编码效率较低，可能是由于词汇表较小或文本复杂性")
 
         # 对比结论
         if len(results) >= 2:
-            print(f"\n对比分析:")
-            print(f"  • 词汇表大小从 10K 增加到 32K，压缩率变化: ", end="")
+            print("\n对比分析:")
+            print("  • 词汇表大小从 10K 增加到 32K，压缩率变化: ", end="")
 
-            if "ts_on_ts" in locals() and "owt_on_owt" in locals():
+            if ts_on_ts is not None and owt_on_owt is not None:
                 diff = ts_on_ts["bytes_per_token"] - owt_on_owt["bytes_per_token"]
                 if diff > 0:
                     print(f"提高了 {abs(diff):.2f} 字节/令牌 ({abs(diff) / ts_on_ts['bytes_per_token'] * 100:.1f}%)")
-                    print(f"    说明更大的词汇表可以更好地压缩文本")
+                    print("    说明更大的词汇表可以更好地压缩文本")
                 else:
                     print(f"降低了 {abs(diff):.2f} 字节/令牌")
 

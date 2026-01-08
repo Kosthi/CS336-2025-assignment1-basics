@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
 from collections.abc import Iterable
 import multiprocessing
 from typing import IO, Any, BinaryIO
@@ -29,7 +30,6 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-import regex as re
 
 
 def run_linear(
@@ -473,7 +473,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return in_features * torch.sigmoid(in_features)
 
 
 def run_get_batch(
@@ -650,9 +650,9 @@ if cpp_build_dir not in sys.path:
     sys.path.append(cpp_build_dir)
 
 try:
-    import bpe
+    bpe: Any | None = importlib.import_module("bpe")
 except ImportError:
-    pass
+    bpe = None
 
 
 def run_train_bpe(
@@ -664,6 +664,11 @@ def run_train_bpe(
     """
     Train BPE on the given input file.
     """
+    if bpe is None:
+        raise RuntimeError("bpe module is not available; build cpp extension first")
+    train_fn = getattr(bpe, "train", None)
+    if train_fn is None:
+        raise RuntimeError("bpe.train is not available; build cpp extension first")
     t0 = time.time()
     cpu_cores = min(multiprocessing.cpu_count(), 24)
     print(f"Using {cpu_cores} cores for pre-tokenization", flush=True)
@@ -680,7 +685,7 @@ def run_train_bpe(
 
     t2 = time.time()
     print("[driver] start bpe.train", flush=True)
-    result = bpe.train(distinct_words, counts, vocab_size, special_tokens)
+    result = train_fn(distinct_words, counts, vocab_size, special_tokens)
     t3 = time.time()
     print("[driver] done bpe.train", flush=True)
 

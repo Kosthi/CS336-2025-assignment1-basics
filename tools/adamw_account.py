@@ -53,7 +53,7 @@ def calculate_gpt2xl_instance(batch_size):
     d = 1600  # d_model
     h = 25  # num_heads (d = 1600, d/h = 64)
 
-    print(f"GPT-2 XL 超参数:")
+    print("GPT-2 XL 超参数:")
     print(f"  词表大小 V = {V:,}")
     print(f"  上下文长度 T = {T}")
     print(f"  层数 L = {L}")
@@ -151,7 +151,7 @@ def calculate_adamw_flops():
 
     flops_adamw = 10 * P
 
-    print(f"\n一步 AdamW 的总 FLOPs = 10 × P")
+    print("\n一步 AdamW 的总 FLOPs = 10 × P")
     print(f"                       = {flops_adamw:.2e}")
 
     return flops_adamw
@@ -182,11 +182,11 @@ def calculate_training_time(mfu_percent=50, steps=400000, batch_size=1024):
     # 总 FLOPs/步 ≈ 6 × B × T × P
     flops_per_step = 6 * batch_size * T * P
 
-    print(f"每训练步的 FLOPs:")
-    print(f"  前向传播: ~2 × B × T × P")
-    print(f"  后向传播: ~4 × B × T × P (假设是前向的2倍)")
-    print(f"  总计: ~6 × B × T × P")
-    print(f"\n代入:")
+    print("每训练步的 FLOPs:")
+    print("  前向传播: ~2 × B × T × P")
+    print("  后向传播: ~4 × B × T × P (假设是前向的2倍)")
+    print("  总计: ~6 × B × T × P")
+    print("\n代入:")
     print(f"  B = {batch_size}, T = {T}, P = {P:.2e}")
     print(f"  FLOPs/步 = {flops_per_step:.2e}")
 
@@ -200,7 +200,7 @@ def calculate_training_time(mfu_percent=50, steps=400000, batch_size=1024):
     a100_peak_tflops = 19.5  # TFLOPS for float32
     a100_peak_flops = a100_peak_tflops * 1e12  # FLOPs/sec
 
-    print(f"\nNVIDIA A100 理论峰值:")
+    print("\nNVIDIA A100 理论峰值:")
     print(f"  {a100_peak_tflops} TFLOPS = {a100_peak_flops:.1e} FLOPs/sec")
 
     # 实际吞吐量
@@ -214,7 +214,7 @@ def calculate_training_time(mfu_percent=50, steps=400000, batch_size=1024):
     training_time_seconds = total_flops / actual_throughput
     training_time_days = training_time_seconds / (24 * 3600)
 
-    print(f"\n训练时间:")
+    print("\n训练时间:")
     print(f"  {training_time_seconds:.1e} 秒")
     print(f"  {training_time_days:.1f} 天")
     print(f"  {training_time_days / 365:.1f} 年")
@@ -247,10 +247,10 @@ def main():
     # (d) 训练时间估算
     print(f"\n{'=' * 80}")
     print("训练配置:")
-    print(f"  步骤数: 400,000")
-    print(f"  批次大小: 1024")
-    print(f"  上下文长度: 1024")
-    print(f"  MFU: 50%")
+    print("  步骤数: 400,000")
+    print("  批次大小: 1024")
+    print("  上下文长度: 1024")
+    print("  MFU: 50%")
     training_days = calculate_training_time()
 
     print(f"\n{'=' * 80}")

@@ -1,9 +1,6 @@
 import random
 import os
 import mmap
-from typing import List, Tuple, Generator
-import time
-import hashlib
 
 
 class LargeFileSampler:
@@ -19,7 +16,7 @@ class LargeFileSampler:
 
         doc_count = 0
         try:
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
                 # 使用内存映射处理大文件
                 mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
 
@@ -30,7 +27,7 @@ class LargeFileSampler:
         except Exception as e:
             print(f"统计文档数量时出错: {e}")
             # 回退到逐行读取
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
                 content = f.read(100 * 1024 * 1024)  # 只读取前100MB来估计
                 doc_count = content.count(delimiter)
 
@@ -39,7 +36,7 @@ class LargeFileSampler:
 
     def sample_documents_mmap(
         self, filepath: str, num_samples: int = 10, delimiter: str = "<|endoftext|>"
-    ) -> List[str]:
+    ) -> list[str]:
         """
         使用内存映射从大文件中采样文档
         """
@@ -80,7 +77,7 @@ class LargeFileSampler:
                             doc_text = doc_bytes.decode("utf-8").strip()
                             if doc_text:
                                 sampled_docs.append(doc_text)
-                        except:
+                        except UnicodeDecodeError:
                             # 跳过解码失败的文档
                             pass
                 else:
@@ -94,7 +91,7 @@ class LargeFileSampler:
                             doc_text = doc_bytes.decode("utf-8").strip()
                             if doc_text:
                                 sampled_docs.append(doc_text)
-                        except:
+                        except UnicodeDecodeError:
                             # 跳过解码失败的文档
                             pass
 
@@ -108,7 +105,7 @@ class LargeFileSampler:
 
     def sample_documents_streaming(
         self, filepath: str, num_samples: int = 10, delimiter: str = "<|endoftext|>", chunk_size: int = 1024 * 1024
-    ) -> List[str]:
+    ) -> list[str]:
         """
         流式采样：分批读取文件，避免内存问题
         """
@@ -118,7 +115,7 @@ class LargeFileSampler:
             # 第一步：统计文档数量
             print("正在统计文档数量...")
             total_docs = 0
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
                 buffer = ""
                 while True:
                     chunk = f.read(chunk_size)
@@ -138,9 +135,8 @@ class LargeFileSampler:
             reservoir = []
             current_doc_num = 0
 
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
                 current_doc = []
-                in_doc = False
 
                 for line in f:
                     # 检查行中是否包含分隔符
@@ -191,7 +187,7 @@ class LargeFileSampler:
 
     def sample_documents_simple(
         self, filepath: str, num_samples: int = 10, delimiter: str = "<|endoftext|>"
-    ) -> List[str]:
+    ) -> list[str]:
         """
         简单但有效的采样方法：随机读取文件位置
         """
@@ -230,7 +226,7 @@ class LargeFileSampler:
                                 documents.append(doc_text)
                                 if len(documents) >= num_samples:
                                     break
-                    except:
+                    except Exception:
                         continue
 
             print(f"简单采样完成: {len(documents)} 个文档")
@@ -242,7 +238,7 @@ class LargeFileSampler:
 
     def sample_with_validation(
         self, filepath: str, num_samples: int = 10, delimiter: str = "<|endoftext|>"
-    ) -> List[str]:
+    ) -> list[str]:
         """
         带验证的采样：尝试多种方法
         """
@@ -274,7 +270,7 @@ class LargeFileSampler:
         print(f"最终采样到 {len(samples)} 个文档")
         return samples[:num_samples]
 
-    def create_sample_documents(self, num_samples: int) -> List[str]:
+    def create_sample_documents(self, num_samples: int) -> list[str]:
         """创建示例文档"""
         sample_docs = [
             "This is a sample document from a large OpenWebText file.",
@@ -295,11 +291,11 @@ class LargeFileSampler:
         print(f"\n分析文件格式: {filepath}")
 
         try:
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            with open(filepath, encoding="utf-8", errors="ignore") as f:
                 # 读取文件头部
                 head = f.read(5000)
 
-                print(f"文件头部预览 (前5000字符):")
+                print("文件头部预览 (前5000字符):")
                 print("-" * 50)
                 print(head[:500])
                 print("..." if len(head) > 500 else "")
@@ -329,18 +325,18 @@ class LargeFileSampler:
                     tail_bytes = f_bin.read(5000)
                     try:
                         tail = tail_bytes.decode("utf-8", errors="ignore")
-                        print(f"\n文件尾部预览:")
+                        print("\n文件尾部预览:")
                         print("-" * 50)
                         print(tail[-500:])
                         print("-" * 50)
-                    except:
+                    except Exception:
                         print("无法解码文件尾部")
 
         except Exception as e:
             print(f"分析文件格式时出错: {e}")
 
 
-def sample_openwebtext_large(filepath: str, num_samples: int = 10) -> List[str]:
+def sample_openwebtext_large(filepath: str, num_samples: int = 10) -> list[str]:
     """
     专为大型OpenWebText文件设计的采样函数
     """
@@ -357,14 +353,14 @@ def sample_openwebtext_large(filepath: str, num_samples: int = 10) -> List[str]:
     return samples
 
 
-def sample_tinystories_simple(filepath: str, num_samples: int = 10) -> List[str]:
+def sample_tinystories_simple(filepath: str, num_samples: int = 10) -> list[str]:
     """
     采样TinyStories文件（通常较小）
     """
     print(f"采样TinyStories文件: {filepath}")
 
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
 
         # 分割文档
@@ -486,7 +482,7 @@ def main():
         for doc in openwebtext_samples:
             f.write(f"{doc}<|endoftext|>")
 
-    print(f"结果已保存到 sampled_tinystories.txt, sampled_owt.txt")
+    print("结果已保存到 sampled_tinystories.txt, sampled_owt.txt")
 
     # 保存纯文本版本（不带分隔符）
     # with open("sampled_documents_clean.txt", "w", encoding="utf-8") as f:
@@ -535,7 +531,7 @@ def check_file_format():
                 for delim in common_delimiters:
                     if delim in head_text:
                         print(f"找到可能的分隔符: {repr(delim)}")
-        except:
+        except Exception:
             print("无法解码文件开头")
 
     # 读取文件结尾
@@ -548,7 +544,7 @@ def check_file_format():
             print("-" * 50)
             print(tail_text)
             print("-" * 50)
-        except:
+        except Exception:
             print("无法解码文件结尾")
 
 

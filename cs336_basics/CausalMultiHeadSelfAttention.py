@@ -6,7 +6,14 @@ from .RotaryPositionalEmbedding import RotaryPositionalEmbedding
 
 
 class CausalMultiHeadSelfAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, theta: float = None, max_seq_len: int = None, device=None):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        theta: float | None = None,
+        max_seq_len: int | None = None,
+        device=None,
+    ):
         """
         构建线性变换模块。
         参数：
@@ -28,11 +35,13 @@ class CausalMultiHeadSelfAttention(nn.Module):
 
         # 是否使用 rope
         if theta is not None:
+            if max_seq_len is None:
+                raise ValueError("使用 RoPE 时必须提供 max_seq_len")
             self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len, device=device)
         else:
             self.rope = None
 
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None) -> torch.Tensor:
         """将线性变换应用于输入。"""
         batch_size, seq_len, _ = x.shape
 

@@ -31,6 +31,7 @@ def load_checkpoint(
     src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
+    map_location: str | torch.device | None = None,
 ):
     """
     从检查点加载模型、优化器和训练迭代次数。
@@ -43,7 +44,7 @@ def load_checkpoint(
     返回:
         iteration: 保存的训练迭代次数
     """
-    checkpoint = torch.load(src)
+    checkpoint = torch.load(src, map_location=map_location)
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     return checkpoint["iteration"]

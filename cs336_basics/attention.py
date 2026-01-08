@@ -4,7 +4,7 @@ from .softmax import softmax
 
 
 def scaled_dot_product_attention(
-    queries: torch.Tensor, keys: torch.Tensor, values: torch.Tensor, mask: torch.Tensor = None
+    queries: torch.Tensor, keys: torch.Tensor, values: torch.Tensor, mask: torch.Tensor | None = None
 ):
     """
     参数：

@@ -1,11 +1,10 @@
 import torch
 import torch.nn as nn
-from torch.nn import init
 from .Linear import Linear
 
 
 class SwiGLU(nn.Module):
-    def __init__(self, d_model: int, d_ff: int = None, multiple_of: int = 64):
+    def __init__(self, d_model: int, d_ff: int | None = None, multiple_of: int = 64):
         """
         初始化 SwiGLU 前馈网络
 
@@ -46,3 +45,17 @@ class SwiGLU(nn.Module):
         # 逐元素相乘（门控）
         glu = silu * self.W3(x)
         return self.W2(glu)
+
+
+class SiLUFFN(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, multiple_of: int = 64):
+        super().__init__()
+        if d_ff % multiple_of != 0:
+            d_ff = multiple_of * ((d_ff + multiple_of - 1) // multiple_of)
+        self.W1 = Linear(in_features=d_model, out_features=d_ff)
+        self.W2 = Linear(in_features=d_ff, out_features=d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.W1(x)
+        x = x * torch.sigmoid(x)
+        return self.W2(x)
