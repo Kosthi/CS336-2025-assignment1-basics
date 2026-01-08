@@ -22,6 +22,7 @@ from cs336_basics.cross_entropy import cross_entropy
 from cs336_basics.optimizer.adamw import AdamW
 from cs336_basics.optimizer.lr_cosine_schedule import lr_cosine_schedule
 from cs336_basics.utils.gradient_clipping import gradient_clipping
+from cs336_basics.utils.dataloader import DataLoader
 
 import numpy.typing as npt
 import torch
@@ -494,7 +495,8 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    dataloader = DataLoader(dataset, batch_size, context_length, device)
+    return dataloader.get_batch()
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
