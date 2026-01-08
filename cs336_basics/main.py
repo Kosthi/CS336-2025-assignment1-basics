@@ -241,6 +241,7 @@ def _train_from_text(args: argparse.Namespace) -> None:
         raise FileExistsError(f"{vocab_path} 或 {merges_path} 已存在（传 --overwrite 以覆盖）")
     tokenizer.save(str(vocab_path), str(merges_path))
     print(f"stage=tokenizer_saved vocab={vocab_path.name} merges={merges_path.name}", flush=True)
+    actual_vocab_size = tokenizer.get_vocab_size()
 
     print(f"stage=encode_train path={Path(args.train_text).name}", flush=True)
     _encode_text_to_bin(
@@ -261,6 +262,7 @@ def _train_from_text(args: argparse.Namespace) -> None:
 
     print("stage=train", flush=True)
     train_args = argparse.Namespace(**vars(args))
+    train_args.vocab_size = actual_vocab_size
     train_args.train_data = str(train_bin)
     train_args.valid_data = str(valid_bin)
     _train(train_args)
@@ -319,6 +321,7 @@ def _train(args: argparse.Namespace) -> None:
     if args.d_ff is None:
         args.d_ff = 4 * args.d_model if args.ffn_type == "silu" else 1344
 
+    ckpt_config = vars(args).copy()
     model = TransformerLM(
         vocab_size=args.vocab_size,
         context_length=args.context_length,
@@ -468,11 +471,11 @@ def _train(args: argparse.Namespace) -> None:
 
         if args.ckpt_interval and (it + 1) % args.ckpt_interval == 0:
             ckpt_path = out_dir / f"checkpoint_step_{it + 1}.pt"
-            save_checkpoint(model, optimizer, iteration=it + 1, out=ckpt_path)
+            save_checkpoint(model, optimizer, iteration=it + 1, out=ckpt_path, config=ckpt_config)
             print(f"ckpt_saved={ckpt_path.name}", flush=True)
 
     final_ckpt = out_dir / "checkpoint_final.pt"
-    save_checkpoint(model, optimizer, iteration=args.max_steps, out=final_ckpt)
+    save_checkpoint(model, optimizer, iteration=args.max_steps, out=final_ckpt, config=ckpt_config)
     print(f"ckpt_saved={final_ckpt.name}", flush=True)
     if wandb_run:
         wandb_run.finish()
@@ -485,35 +488,56 @@ def _generate(args: argparse.Namespace) -> None:
         torch.set_float32_matmul_precision(args.matmul_precision)
 
     tokenizer = _load_bpe_tokenizer(args.vocab_path, args.merges_path, special_tokens=args.special_tokens)
-    vocab_size = tokenizer.get_vocab_size()
+    vocab_size_from_tokenizer = tokenizer.get_vocab_size()
 
-    if args.d_ff is None:
-        args.d_ff = 4 * args.d_model if args.ffn_type == "silu" else 1344
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    ckpt_config = checkpoint.get("config") if isinstance(checkpoint, dict) else None
+    config = ckpt_config if isinstance(ckpt_config, dict) else {}
+
+    vocab_size = int(config.get("vocab_size", vocab_size_from_tokenizer))
+    if "vocab_size" in config and vocab_size_from_tokenizer != vocab_size:
+        raise ValueError(
+            f"checkpoint vocab_size={vocab_size} 与 tokenizer vocab_size={vocab_size_from_tokenizer} 不一致"
+        )
+
+    context_length = int(config.get("context_length", args.context_length))
+    d_model = int(config.get("d_model", args.d_model))
+    num_layers = int(config.get("num_layers", args.num_layers))
+    num_heads = int(config.get("num_heads", args.num_heads))
+    rope_theta = float(config.get("rope_theta", args.rope_theta))
+    no_rmsnorm = bool(config.get("no_rmsnorm", args.no_rmsnorm))
+    norm_style = str(config.get("norm_style", args.norm_style))
+    no_rope = bool(config.get("no_rope", args.no_rope))
+    ffn_type = str(config.get("ffn_type", args.ffn_type))
+    d_ff = config.get("d_ff", args.d_ff)
+    if d_ff is None:
+        d_ff = 4 * d_model if ffn_type == "silu" else 1344
+    d_ff = int(d_ff)
 
     model = TransformerLM(
         vocab_size=vocab_size,
-        context_length=args.context_length,
-        d_model=args.d_model,
-        num_layers=args.num_layers,
-        num_heads=args.num_heads,
-        d_ff=args.d_ff,
-        rope_theta=args.rope_theta,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
         device=device,
-        use_rmsnorm=not args.no_rmsnorm,
-        norm_style=args.norm_style,
-        use_rope=not args.no_rope,
-        ffn_type=args.ffn_type,
+        use_rmsnorm=not no_rmsnorm,
+        norm_style=norm_style,
+        use_rope=not no_rope,
+        ffn_type=ffn_type,
     ).to(device)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
 
     if args.compile:
         if device.startswith("mps") and args.compile_backend is None:
             model = torch.compile(model, backend="aot_eager")
         else:
             model = torch.compile(model, backend=args.compile_backend) if args.compile_backend else torch.compile(model)
-
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
+        model.eval()
 
     eos_id = None
     if args.eos_token:
@@ -526,7 +550,7 @@ def _generate(args: argparse.Namespace) -> None:
     rng.manual_seed(args.seed)
 
     for _ in range(args.max_new_tokens):
-        x = torch.tensor([generated[-args.context_length :]], dtype=torch.long, device=device)
+        x = torch.tensor([generated[-context_length:]], dtype=torch.long, device=device)
         logits = model(x)[:, -1, :]
         logits = logits / max(args.temperature, 1e-8)
 

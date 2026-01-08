@@ -8,6 +8,7 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     iteration: int,
     out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    config: dict[str, typing.Any] | None = None,
 ):
     """
     保存模型、优化器和训练迭代次数的检查点。
@@ -23,6 +24,8 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "iteration": iteration,
     }
+    if config is not None:
+        checkpoint["config"] = config
 
     torch.save(checkpoint, out)
 
