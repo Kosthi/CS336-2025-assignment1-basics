@@ -1,5 +1,8 @@
 import json
 from collections.abc import Iterable, Iterator
+import importlib
+from pathlib import Path
+import sys
 import regex as re
 
 
@@ -29,10 +32,36 @@ class BPETokenizer:
 
         print("merge", len(merges), "vocab", len(vocab.keys()))
 
-        # 构建合并操作索引，用于快速查找
-        self.merge_rank = {}
-        for rank, (a, b) in enumerate(merges):
-            self.merge_rank[(a, b)] = rank
+        self._cpp_merger = None
+        self._cpp_id_encoder = None
+        self._cpp_pretoken_encoder = None
+        try:
+            project_root = Path(__file__).resolve().parents[1]
+            cpp_build_dir = project_root / "cpp" / "build"
+            if cpp_build_dir.exists():
+                build_dir_str = str(cpp_build_dir)
+                if build_dir_str not in sys.path:
+                    sys.path.append(build_dir_str)
+            bpe = importlib.import_module("bpe")
+            pretoken_encoder_cls = getattr(bpe, "BPEPreTokenEncoder", None)
+            if pretoken_encoder_cls is not None:
+                self._cpp_pretoken_encoder = pretoken_encoder_cls(self.id_to_token, self.merges, self.special_tokens)
+            id_encoder_cls = getattr(bpe, "BPEIdEncoder", None)
+            if id_encoder_cls is not None:
+                self._cpp_id_encoder = id_encoder_cls(self.id_to_token, self.merges)
+            merger_cls = getattr(bpe, "BPEMerger", None)
+            if merger_cls is not None:
+                self._cpp_merger = merger_cls(self.merges)
+        except Exception:
+            self._cpp_merger = None
+            self._cpp_id_encoder = None
+            self._cpp_pretoken_encoder = None
+
+        if self._cpp_merger is None and self._cpp_id_encoder is None and self._cpp_pretoken_encoder is None:
+            # 使用py版本归并，构建合并操作索引，用于快速查找
+            self.merge_rank = {}
+            for rank, (a, b) in enumerate(merges):
+                self.merge_rank[(a, b)] = rank
 
         self.gpt2_pat = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
@@ -96,6 +125,9 @@ class BPETokenizer:
         if not self.merges:
             return [token_bytes]
 
+        if self._cpp_merger is not None:
+            return list(self._cpp_merger.apply(token_bytes))
+
         # 将字节序列拆分为单个字节的列表
         tokens = [bytes([b]) for b in token_bytes]
 
@@ -140,6 +172,12 @@ class BPETokenizer:
         # 预分词
         pre_tokens = self._pre_tokenize(text)
         # print("pre_tokens:", pre_tokens)
+
+        if self._cpp_pretoken_encoder is not None:
+            # pybind11 把 list[str] 转成 std::vector<std::string> 时，
+            # 会用 CPython 的 UTF-8 表示把每个 str 转成 std::string，不需要手动 encode("utf-8")
+            return list(self._cpp_pretoken_encoder.encode_pretokens(pre_tokens))
+
         token_ids = []
 
         for token_str in pre_tokens:
@@ -150,6 +188,10 @@ class BPETokenizer:
             if token_str in self.special_tokens:
                 # 特殊令牌，直接获取ID
                 token_ids.append(self.token_to_id[token_bytes])
+                continue
+
+            if self._cpp_id_encoder is not None:
+                token_ids.extend(self._cpp_id_encoder.encode_token(token_bytes))
                 continue
 
             # 应用BPE合并
