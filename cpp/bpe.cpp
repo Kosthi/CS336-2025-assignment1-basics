@@ -438,42 +438,57 @@ namespace bpe {
         return trainer.train(vocab_size, special_tokens);
     }
 
+#ifdef BUILD_PYTHON_MODULE
     class BPEMerger {
     public:
-        explicit BPEMerger(const std::vector<std::pair<Bytes, Bytes>> &merges) {
-            id_to_token_.reserve(256 + merges.size() * 2);
-            for (int i = 0; i < 256; ++i) {
-                Bytes b(1, static_cast<char>(i));
-                uint32_t id = intern_(b);
-                byte_to_id_[static_cast<unsigned char>(i)] = id;
-            }
+        BPEMerger() = default;
 
+        BPEMerger(
+            const std::vector<std::pair<Bytes, Bytes>> &merges,
+            const std::unordered_map<std::string, int> &vocab_to_id,
+            const std::array<int, 256> &byte_to_vocab_id
+        ) : byte_to_vocab_id_(byte_to_vocab_id) {
             pair_to_rank_.reserve(merges.size() * 2);
-            pair_to_merged_id_.reserve(merges.size() * 2);
+            pair_to_vocab_id_.reserve(merges.size() * 2);
+
+            // 预存 a、b的哈希与合并后的映射 token id
             for (uint32_t rank = 0; rank < merges.size(); ++rank) {
                 const auto &a = merges[rank].first;
                 const auto &b = merges[rank].second;
-                uint32_t a_id = intern_(a);
-                uint32_t b_id = intern_(b);
+
+                auto a_it = vocab_to_id.find(a);
+                auto b_it = vocab_to_id.find(b);
+                if (a_it == vocab_to_id.end() || b_it == vocab_to_id.end()) {
+                    continue;
+                }
+                uint32_t a_id = static_cast<uint32_t>(a_it->second);
+                uint32_t b_id = static_cast<uint32_t>(b_it->second);
+
                 Bytes merged = a;
                 merged.append(b);
-                uint32_t merged_id = intern_(merged);
+                auto merged_it = vocab_to_id.find(merged);
+                if (merged_it == vocab_to_id.end()) {
+                    continue;
+                }
+                int merged_id = merged_it->second;
 
                 uint64_t key = pair_key_(a_id, b_id);
                 pair_to_rank_.emplace(key, static_cast<int>(rank));
-                pair_to_merged_id_.emplace(key, merged_id);
+                pair_to_vocab_id_.emplace(key, merged_id);
             }
         }
 
-        std::vector<Bytes> apply(const Bytes &token_bytes) const {
+        std::vector<int> apply(const Bytes &token_bytes) const {
             if (token_bytes.empty()) {
                 return {};
             }
 
-            std::vector<uint32_t> tokens;
+            std::vector<int> tokens;
             tokens.reserve(token_bytes.size());
+            // 编码为 utf-8后，必然可以用 0-255 表示一个字节
             for (unsigned char c : token_bytes) {
-                tokens.emplace_back(byte_to_id_[c]);
+                int id = byte_to_vocab_id_[c];
+                tokens.emplace_back(id);
             }
 
             while (tokens.size() > 1) {
@@ -499,106 +514,35 @@ namespace bpe {
                     break;
                 }
 
-                auto merged_it = pair_to_merged_id_.find(best_key);
-                if (merged_it == pair_to_merged_id_.end()) {
+                auto merged_it = pair_to_vocab_id_.find(best_key);
+                if (merged_it == pair_to_vocab_id_.end()) {
                     break;
                 }
 
-                tokens[best_i] = merged_it->second;
+                tokens[best_i] = static_cast<uint32_t>(merged_it->second);
                 tokens.erase(tokens.begin() + static_cast<std::ptrdiff_t>(best_i) + 1);
             }
 
-            std::vector<Bytes> out;
-            out.reserve(tokens.size());
-            for (uint32_t &id : tokens) {
-                out.emplace_back(id_to_token_[id]);
-            }
-            return out;
+            return tokens;
         }
 
     private:
-        struct BytesHash {
-            using is_transparent = void;
-            std::size_t operator()(const Bytes &s) const noexcept {
-                return std::hash<Bytes>()(s);
-            }
-            std::size_t operator()(std::string_view sv) const noexcept {
-                return std::hash<std::string_view>()(sv);
-            }
-        };
-
-        uint32_t intern_(const Bytes &b) {
-            auto it = token_to_id_.find(b);
-            if (it != token_to_id_.end()) {
-                return it->second;
-            }
-            uint32_t id = static_cast<uint32_t>(id_to_token_.size());
-            id_to_token_.emplace_back(b);
-            token_to_id_.emplace(id_to_token_.back(), id);
-            return id;
-        }
-
         static uint64_t pair_key_(uint32_t left, uint32_t right) {
             return (static_cast<uint64_t>(left) << 32) | static_cast<uint64_t>(right);
         }
 
-        std::array<uint32_t, 256> byte_to_id_{};
-        std::vector<Bytes> id_to_token_;
-        std::unordered_map<Bytes, uint32_t, BytesHash, std::equal_to<>> token_to_id_;
         std::unordered_map<uint64_t, int> pair_to_rank_;
-        std::unordered_map<uint64_t, uint32_t> pair_to_merged_id_;
-    };
-
-#ifdef BUILD_PYTHON_MODULE
-    class BPEIdEncoder {
-    public:
-        BPEIdEncoder(const py::dict &vocab, const std::vector<std::pair<Bytes, Bytes>> &merges) : merger_(merges) {
-            byte_to_vocab_id_.fill(-1);
-            vocab_to_id_.reserve(static_cast<size_t>(vocab.size()) * 2);
-            for (auto item : vocab) {
-                int id = py::cast<int>(item.first);
-                std::string token = py::cast<py::bytes>(item.second);
-                if (token.size() == 1) {
-                    byte_to_vocab_id_[static_cast<unsigned char>(token[0])] = id;
-                }
-                vocab_to_id_.emplace(std::move(token), id);
-            }
-        }
-
-        std::vector<int> encode_token(py::bytes token_bytes) const {
-            std::string s = token_bytes;
-            auto merged = merger_.apply(s);
-            std::vector<int> out;
-            out.reserve(s.size());
-            for (const auto &tok : merged) {
-                auto it = vocab_to_id_.find(tok);
-                if (it != vocab_to_id_.end()) {
-                    out.push_back(it->second);
-                    continue;
-                }
-                for (unsigned char c : tok) {
-                    int id = byte_to_vocab_id_[c];
-                    if (id != -1) {
-                        out.push_back(id);
-                    }
-                }
-            }
-            return out;
-        }
-
-    private:
-        BPEMerger merger_;
+        std::unordered_map<uint64_t, int> pair_to_vocab_id_;
         std::array<int, 256> byte_to_vocab_id_{};
-        std::unordered_map<std::string, int> vocab_to_id_;
     };
 
-    class BPEPreTokenEncoder {
+    class BPETokenEncoder {
     public:
-        BPEPreTokenEncoder(
+        BPETokenEncoder(
             const py::dict &vocab,
             const std::vector<std::pair<Bytes, Bytes>> &merges,
             const std::vector<std::string> &special_tokens
-        ) : merger_(merges) {
+        ) {
             byte_to_vocab_id_.fill(-1);
             vocab_to_id_.reserve(static_cast<size_t>(vocab.size()) * 2);
             for (auto &item : vocab) {
@@ -613,12 +557,13 @@ namespace bpe {
             for (const auto &s : special_tokens) {
                 special_set_.insert(s);
             }
+            merger_ = BPEMerger(merges, vocab_to_id_, byte_to_vocab_id_);
         }
 
-        std::vector<int> encode_pretokens(const std::vector<std::string> &pre_tokens) const {
+        std::vector<int> encode_tokens(const std::vector<std::string> &tokens) const {
             std::vector<int> out;
-            out.reserve(pre_tokens.size() * 2);
-            for (const auto &tok_str : pre_tokens) {
+            out.reserve(tokens.size() * 2);
+            for (const auto &tok_str : tokens) {
                 if (special_set_.find(tok_str) != special_set_.end()) {
                     auto it = vocab_to_id_.find(tok_str);
                     if (it != vocab_to_id_.end()) {
@@ -633,20 +578,8 @@ namespace bpe {
 
     private:
         void encode_token_bytes_(const std::string &token_bytes, std::vector<int> &out) const {
-            auto merged = merger_.apply(token_bytes);
-            for (const auto &tok : merged) {
-                auto it = vocab_to_id_.find(tok);
-                if (it != vocab_to_id_.end()) {
-                    out.emplace_back(it->second);
-                    continue;
-                }
-                for (unsigned char c : tok) {
-                    int id = byte_to_vocab_id_[c];
-                    if (id != -1) {
-                        out.emplace_back(id);
-                    }
-                }
-            }
+            auto ids = merger_.apply(token_bytes);
+            out.insert(out.end(), ids.begin(), ids.end());
         }
 
         BPEMerger merger_;
@@ -706,29 +639,11 @@ PYBIND11_MODULE(bpe, m) {
           py::arg("vocab_size"),
           py::arg("special_tokens"));
 
-    py::class_<bpe::BPEMerger>(m, "BPEMerger")
-        .def(py::init<const std::vector<std::pair<bpe::Bytes, bpe::Bytes>> &>(), py::arg("merges"))
-        .def("apply", [](const bpe::BPEMerger &merger, py::bytes token_bytes) {
-            std::string s = token_bytes;
-            auto out = merger.apply(s);
-            py::list l;
-            for (const auto &p : out) {
-                l.append(py::bytes(p));
-            }
-            return l;
-        }, py::arg("token_bytes"));
-
-    py::class_<bpe::BPEIdEncoder>(m, "BPEIdEncoder")
-        .def(py::init<const py::dict &, const std::vector<std::pair<bpe::Bytes, bpe::Bytes>> &>(),
-             py::arg("vocab"),
-             py::arg("merges"))
-        .def("encode_token", &bpe::BPEIdEncoder::encode_token, py::arg("token_bytes"));
-
-    py::class_<bpe::BPEPreTokenEncoder>(m, "BPEPreTokenEncoder")
+    py::class_<bpe::BPETokenEncoder>(m, "BPETokenEncoder")
         .def(py::init<const py::dict &, const std::vector<std::pair<bpe::Bytes, bpe::Bytes>> &, const std::vector<std::string> &>(),
              py::arg("vocab"),
              py::arg("merges"),
              py::arg("special_tokens"))
-        .def("encode_pretokens", &bpe::BPEPreTokenEncoder::encode_pretokens, py::arg("pre_tokens"));
+        .def("encode_tokens", &bpe::BPETokenEncoder::encode_tokens, py::arg("tokens"));
 }
 #endif
