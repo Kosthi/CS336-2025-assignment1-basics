@@ -8,24 +8,24 @@ train:
   vocab_size: 10000
   context_length: 256
   d_model: 512
-  d_ff: null
+  d_ff: 1344
   num_layers: 4
   num_heads: 16
   rope_theta: 10000.0
 
   optimizer: adamw
-  learning_rate: 0.0003
-  min_learning_rate: 0.00003
-  warmup_iters: 200
+  learning_rate: 0.001
+  min_learning_rate: 0.0001
+  warmup_iters: 300
   cosine_cycle_iters: null
   beta1: 0.9
-  beta2: 0.95
+  beta2: 0.999
   eps: 1.0e-8
   weight_decay: 0.1
   grad_clip: 1.0
 
   batch_size: 32
-  max_steps: 5000
+  max_steps: 4000
   log_interval: 10
   eval_interval: 200
   eval_iters: 50
@@ -37,7 +37,7 @@ train:
   ffn_type: swiglu
 
   device: auto
-  seed: 1337
+  seed: 42
   matmul_precision: null
   compile: false
   compile_backend: null
@@ -61,24 +61,24 @@ train-from-text:
   vocab_size: 10000
   context_length: 256
   d_model: 512
-  d_ff: null
+  d_ff: 1344
   num_layers: 4
   num_heads: 16
   rope_theta: 10000.0
 
   optimizer: adamw
-  learning_rate: 0.0003
-  min_learning_rate: 0.00003
+  learning_rate: 0.001
+  min_learning_rate: 0.0001
   warmup_iters: 200
   cosine_cycle_iters: null
   beta1: 0.9
-  beta2: 0.95
+  beta2: 0.999
   eps: 1.0e-8
   weight_decay: 0.1
   grad_clip: 1.0
 
   batch_size: 32
-  max_steps: 5000
+  max_steps: 4000
   log_interval: 10
   eval_interval: 200
   eval_iters: 50
@@ -90,7 +90,7 @@ train-from-text:
   ffn_type: swiglu
 
   device: auto
-  seed: 1337
+  seed: 42
   matmul_precision: null
   compile: false
   compile_backend: null
@@ -106,7 +106,7 @@ generate:
 
   context_length: 256
   d_model: 512
-  d_ff: null
+  d_ff: 1344
   num_layers: 4
   num_heads: 16
   rope_theta: 10000.0
@@ -125,7 +125,7 @@ generate:
   stop_strings: []
   eos_token: "<|endoftext|>"
 
-  seed: 1337
+  seed: 42
   device: auto
   matmul_precision: null
   compile: false
