@@ -9,6 +9,7 @@ class AdamW(torch.optim.Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure=None):
         loss = None
         if closure is not None:
@@ -17,7 +18,7 @@ class AdamW(torch.optim.Optimizer):
         for group in self.param_groups:
             # 获取学习率等参数
             alpha = group["lr"]
-            beta1, beat2 = group["betas"]
+            beta1, beta2 = group["betas"]
             eps = group["eps"]
             weight_decay = group["weight_decay"]
 
@@ -27,30 +28,41 @@ class AdamW(torch.optim.Optimizer):
                 # 获取与参数 p 相关的状态
                 state = self.state[p]
 
+                if len(state) == 0:
+                    state["t"] = 0
+                    state["m"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state["v"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                # 递增迭代次数
+                state["t"] += 1
+
+                # 引用非拷贝
                 # 从状态中获取迭代次数，若无则初始化为 1
-                t = state.get("t", 1)
+                t = state["t"]
                 # 一阶矩估计
-                m = state.get("m", torch.zeros_like(p))
+                m = state["m"]
                 # 二阶矩估计
-                v = state.get("v", torch.zeros_like(p))
+                v = state["v"]
 
                 # 获取损失相对于p的梯度
                 g = p.grad.data
 
-                # 更新一、二阶矩估计
-                m = beta1 * m + (1 - beta1) * g
-                v = beat2 * v + (1 - beat2) * g * g
+                # 更新一、二阶矩估计，原地更新
+                m.mul_(beta1).add_(g, alpha=1 - beta1)
+                v.mul_(beta2).addcmul_(g, g, value=1 - beta2)
 
-                # 计算当前迭代的调整后学习率 αt
-                alpha_t = alpha * math.sqrt(1 - beat2**t) / (1 - beta1**t)
-                # 更新参数
-                p.data -= alpha_t * m / (torch.sqrt(v) + eps)
                 # 应用权重衰减
-                p.data -= alpha * weight_decay * p.data
+                if group["weight_decay"] != 0:
+                    p.mul_(1 - alpha * weight_decay)
 
-                # 递增迭代次数
-                state["t"] = t + 1
-                state["m"] = m
-                state["v"] = v
+                bias_correction1 = 1 - beta1**t
+                bias_correction2 = 1 - beta2**t
+
+                # 计算分母和步长，使用原论文里的计算方法
+                denom = (v / bias_correction2).sqrt().add_(eps)
+                step_size = alpha / bias_correction1
+
+                # 更新参数
+                p.addcdiv_(m, denom, value=-step_size)
 
         return loss
