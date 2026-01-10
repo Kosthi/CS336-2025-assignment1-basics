@@ -1,10 +1,12 @@
 import argparse
 import json
 import os
+import queue
 import sys
 import time
 import importlib
 import multiprocessing
+from multiprocessing import shared_memory
 from pathlib import Path
 from typing import Any
 from collections.abc import Iterable
@@ -21,6 +23,66 @@ from .pretokenization import get_word_counts_parallel
 from .transformer_lm import TransformerLM
 from .utils.checkpointing import load_checkpoint, save_checkpoint
 from .utils.gradient_clipping import gradient_clipping
+
+
+_ENCODE_WORKER_TOKENIZER: BPETokenizer | None = None
+
+
+def _encode_worker_init(tokenizer: BPETokenizer) -> None:
+    global _ENCODE_WORKER_TOKENIZER
+    _ENCODE_WORKER_TOKENIZER = tokenizer
+
+
+def _encode_worker(text: str) -> list[int]:
+    if _ENCODE_WORKER_TOKENIZER is None:
+        raise RuntimeError("worker tokenizer 未初始化")
+    return _ENCODE_WORKER_TOKENIZER.encode(text)
+
+
+def _encode_shm_worker_loop(
+    task_q: Any,
+    done_q: Any,
+    *,
+    tokenizer: BPETokenizer,
+    shm_name: str,
+    dtype_str: str,
+    slot_tokens: int,
+    num_slots: int,
+    max_value: int | None,
+) -> None:
+    shm = shared_memory.SharedMemory(name=shm_name)
+    try:
+        dtype = np.dtype(dtype_str)
+        slots = np.ndarray((num_slots, slot_tokens), dtype=dtype, buffer=shm.buf)
+        while True:
+            item = task_q.get()
+            if item is None:
+                return
+            seq, text, slot_id = item
+            try:
+                token_ids = tokenizer.encode(text)
+                if max_value is not None:
+                    bad_tok = None
+                    for tok in token_ids:
+                        if tok > max_value:
+                            bad_tok = tok
+                            break
+                    if bad_tok is not None:
+                        done_q.put(
+                            (seq, slot_id, 0, f"token id {bad_tok} 超出 dtype={dtype} 可表示范围（max={max_value}）")
+                        )
+                        continue
+
+                length = len(token_ids)
+                if length > slot_tokens:
+                    done_q.put((seq, slot_id, 0, f"片段 token 数 {length} 超过 slot_tokens={slot_tokens}"))
+                    continue
+                slots[slot_id, :length] = np.asarray(token_ids, dtype=dtype)
+                done_q.put((seq, slot_id, length, None))
+            except Exception as e:
+                done_q.put((seq, slot_id, 0, str(e)))
+    finally:
+        shm.close()
 
 
 def _auto_device(requested: str | None) -> str:
@@ -169,8 +231,12 @@ def _encode_text_to_bin(
     output_path: str | os.PathLike,
     dtype: np.dtype,
     overwrite: bool,
-    chunk_bytes: int = 1 << 20,
-    buffer_tokens: int = 1_000_000,
+    chunk_bytes: int = 1 << 22,
+    buffer_tokens: int = 50_000_000,
+    encode_workers: int = 8,
+    encode_backend: str = "pool",
+    encode_slot_tokens: int = 0,
+    encode_num_slots: int = 0,
     log_interval_sec: float = 5.0,
 ) -> None:
     out_path = Path(output_path)
@@ -179,37 +245,153 @@ def _encode_text_to_bin(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     max_value = _dtype_max_value(dtype)
-    buf = np.empty((buffer_tokens,), dtype=dtype)
-    n = 0
     total_tokens = 0
     start_time = time.time()
     last_log_time = start_time
     last_log_tokens = 0
+
+    def _iter_complete_texts() -> Iterable[str]:
+        buffer = ""
+        for chunk in _iter_text_chunks(input_path, chunk_bytes=chunk_bytes):
+            buffer += chunk
+            boundary = tokenizer._find_last_boundary(buffer)
+            if boundary > 0:
+                yield buffer[:boundary]
+                buffer = buffer[boundary:]
+        if buffer:
+            yield buffer
+
     with open(out_path, "wb") as out_f:
-        for tok in tokenizer.encode_iterable(_iter_text_chunks(input_path, chunk_bytes=chunk_bytes)):
-            if max_value is not None and tok > max_value:
-                raise ValueError(f"token id {tok} 超出 dtype={dtype} 可表示范围（max={max_value}）")
-            buf[n] = tok
-            n += 1
-            total_tokens += 1
-            if n == buf.shape[0]:
-                out_f.write(buf.tobytes())
-                n = 0
-            if (total_tokens & 0x3FFFF) == 0:
-                now = time.time()
-                dt = now - last_log_time
-                if dt >= log_interval_sec:
-                    d_tokens = total_tokens - last_log_tokens
-                    tok_per_s = d_tokens / dt if dt > 0 else float("nan")
-                    elapsed = now - start_time
-                    print(
-                        f"encode {out_path.name}: tokens={total_tokens} tok/s={tok_per_s:.0f} time={elapsed / 60:.1f}m",
-                        flush=True,
+
+        def log_progress() -> None:
+            nonlocal last_log_time, last_log_tokens
+            now = time.time()
+            dt = now - last_log_time
+            if dt >= log_interval_sec:
+                d_tokens = total_tokens - last_log_tokens
+                tok_per_s = d_tokens / dt if dt > 0 else float("nan")
+                elapsed = now - start_time
+                print(
+                    f"encode {out_path.name}: tokens={total_tokens} tok/s={tok_per_s:.0f} time={elapsed / 60:.1f}m",
+                    flush=True,
+                )
+                last_log_time = now
+                last_log_tokens = total_tokens
+
+        if encode_workers and encode_workers > 1 and encode_backend == "shm":
+            ctx = multiprocessing.get_context("fork")
+            slot_tokens = encode_slot_tokens if encode_slot_tokens > 0 else max(1_000_000, int(chunk_bytes) * 2)
+            num_slots = encode_num_slots if encode_num_slots > 0 else int(encode_workers) * 2
+            shm_size = int(num_slots) * int(slot_tokens) * int(dtype.itemsize)
+            shm = shared_memory.SharedMemory(create=True, size=shm_size)
+            slots = np.ndarray((num_slots, slot_tokens), dtype=dtype, buffer=shm.buf)
+            task_q = ctx.Queue(maxsize=num_slots * 2)
+            done_q = ctx.Queue(maxsize=num_slots * 2)
+            free_q = ctx.Queue()
+            for i in range(num_slots):
+                free_q.put(i)
+
+            workers: list[multiprocessing.Process] = []
+            try:
+                for _ in range(int(encode_workers)):
+                    p = ctx.Process(
+                        target=_encode_shm_worker_loop,
+                        args=(task_q, done_q),
+                        kwargs={
+                            "tokenizer": tokenizer,
+                            "shm_name": shm.name,
+                            "dtype_str": dtype.str,
+                            "slot_tokens": slot_tokens,
+                            "num_slots": num_slots,
+                            "max_value": max_value,
+                        },
                     )
-                    last_log_time = now
-                    last_log_tokens = total_tokens
-        if n:
-            out_f.write(buf[:n].tobytes())
+                    p.start()
+                    workers.append(p)
+
+                pending: dict[int, tuple[int, int]] = {}
+                next_seq = 0
+                submitted = 0
+                completed = 0
+
+                def process_one_done(*, block: bool) -> None:
+                    nonlocal completed, next_seq, total_tokens
+                    done_seq, slot_id, length, err = done_q.get(block=block)
+                    if err is not None:
+                        raise RuntimeError(err)
+                    pending[int(done_seq)] = (int(slot_id), int(length))
+                    completed += 1
+                    while next_seq in pending:
+                        slot_id2, length2 = pending.pop(next_seq)
+                        out_f.write(slots[slot_id2, :length2].tobytes())
+                        total_tokens += length2
+                        free_q.put(slot_id2)
+                        if (total_tokens & 0x3FFFF) == 0:
+                            log_progress()
+                        next_seq += 1
+
+                for text in _iter_complete_texts():
+                    while True:
+                        try:
+                            slot_id = free_q.get_nowait()
+                            break
+                        except queue.Empty:
+                            process_one_done(block=True)
+                    task_q.put((submitted, text, slot_id))
+                    submitted += 1
+
+                    while True:
+                        try:
+                            process_one_done(block=False)
+                        except queue.Empty:
+                            break
+
+                for _ in workers:
+                    task_q.put(None)
+
+                while completed < submitted:
+                    process_one_done(block=True)
+            finally:
+                for p in workers:
+                    p.join(timeout=1)
+                for p in workers:
+                    if p.is_alive():
+                        p.terminate()
+                for p in workers:
+                    if p.is_alive():
+                        p.join(timeout=1)
+                shm.close()
+                shm.unlink()
+        else:
+            buf = np.empty((buffer_tokens,), dtype=dtype)
+            n = 0
+
+            def write_tok(tok: int) -> None:
+                nonlocal n, total_tokens
+                if max_value is not None and tok > max_value:
+                    raise ValueError(f"token id {tok} 超出 dtype={dtype} 可表示范围（max={max_value}）")
+                buf[n] = tok
+                n += 1
+                total_tokens += 1
+                if n == buf.shape[0]:
+                    out_f.write(buf.tobytes())
+                    n = 0
+                if (total_tokens & 0x3FFFF) == 0:
+                    log_progress()
+
+            if encode_workers and encode_workers > 1:
+                ctx = multiprocessing.get_context("fork")
+                with ctx.Pool(
+                    processes=int(encode_workers), initializer=_encode_worker_init, initargs=(tokenizer,)
+                ) as pool:
+                    for token_ids in pool.imap(_encode_worker, _iter_complete_texts(), chunksize=1):
+                        for tok in token_ids:
+                            write_tok(tok)
+            else:
+                for tok in tokenizer.encode_iterable(_iter_text_chunks(input_path, chunk_bytes=chunk_bytes)):
+                    write_tok(tok)
+            if n:
+                out_f.write(buf[:n].tobytes())
     elapsed = time.time() - start_time
     tok_per_s = total_tokens / elapsed if elapsed > 0 else float("nan")
     print(
@@ -250,6 +432,10 @@ def _train_from_text(args: argparse.Namespace) -> None:
         output_path=train_bin,
         dtype=dtype,
         overwrite=args.overwrite,
+        encode_workers=args.encode_workers,
+        encode_backend=args.encode_backend,
+        encode_slot_tokens=args.encode_slot_tokens,
+        encode_num_slots=args.encode_num_slots,
     )
     print(f"stage=encode_valid path={Path(args.valid_text).name}", flush=True)
     _encode_text_to_bin(
@@ -258,6 +444,10 @@ def _train_from_text(args: argparse.Namespace) -> None:
         output_path=valid_bin,
         dtype=dtype,
         overwrite=args.overwrite,
+        encode_workers=args.encode_workers,
+        encode_backend=args.encode_backend,
+        encode_slot_tokens=args.encode_slot_tokens,
+        encode_num_slots=args.encode_num_slots,
     )
 
     print("stage=train", flush=True)
@@ -322,7 +512,7 @@ def _train(args: argparse.Namespace) -> None:
         args.d_ff = 4 * args.d_model if args.ffn_type == "silu" else 1344
 
     ckpt_config = vars(args).copy()
-    model = TransformerLM(
+    base_model = TransformerLM(
         vocab_size=args.vocab_size,
         context_length=args.context_length,
         d_model=args.d_model,
@@ -337,17 +527,36 @@ def _train(args: argparse.Namespace) -> None:
         ffn_type=args.ffn_type,
     ).to(device)
 
+    model: torch.nn.Module = base_model
     if args.compile:
-        if device.startswith("mps") and args.compile_backend is None:
-            model = torch.compile(model, backend="aot_eager")
-        else:
-            model = torch.compile(model, backend=args.compile_backend) if args.compile_backend else torch.compile(model)
+        preferred_backend = args.compile_backend
+        if preferred_backend is None and device.startswith("mps"):
+            preferred_backend = "aot_eager"
+        try:
+            model = torch.compile(model, backend=preferred_backend) if preferred_backend else torch.compile(model)
+        except Exception as e:
+            print(f"compile_failed backend={preferred_backend or 'inductor'} err={type(e).__name__}: {e}", flush=True)
+            if preferred_backend != "aot_eager":
+                try:
+                    model = torch.compile(model, backend="aot_eager")
+                    print("compile_fallback=success backend=aot_eager", flush=True)
+                except Exception as e2:
+                    print(f"compile_fallback=failed backend=aot_eager err={type(e2).__name__}: {e2}", flush=True)
+                    print("compile_disabled=true", flush=True)
+                    model = base_model
+            else:
+                print("compile_disabled=true", flush=True)
+                model = base_model
 
-    optimizer = _build_optimizer(args.optimizer, model.parameters(), args)
+    optimizer = _build_optimizer(args.optimizer, base_model.parameters(), args)
 
     it0 = 0
     if args.resume_from:
         it0 = int(load_checkpoint(args.resume_from, model=model, optimizer=optimizer, map_location=device))
+        print(f"resume_from={args.resume_from} step={it0}", flush=True)
+        if it0 >= args.max_steps:
+            print(f"nothing_to_do: checkpoint_step={it0} >= max_steps={args.max_steps}", flush=True)
+            return
 
     rng = np.random.default_rng(args.seed)
     eval_rng = np.random.default_rng(args.seed + 1)
@@ -403,7 +612,18 @@ def _train(args: argparse.Namespace) -> None:
         _set_lr(optimizer, lr)
 
         x, y = _get_batch(train_tokens, args.batch_size, args.context_length, device, rng)
-        logits = model(x)
+        try:
+            logits = model(x)
+        except Exception as e:
+            backend_failed = type(e).__name__ == "BackendCompilerFailed"
+            triton_missing = "Cannot find a working triton installation" in str(e)
+            if backend_failed or triton_missing:
+                print(f"compile_runtime_failed err={type(e).__name__}: {e}", flush=True)
+                print("compile_disabled=true", flush=True)
+                model = base_model
+                logits = model(x)
+            else:
+                raise
         loss = _loss_per_token(logits, y)
 
         optimizer.zero_grad(set_to_none=True)
@@ -652,6 +872,10 @@ def _build_parser() -> argparse.ArgumentParser:
     tft.add_argument("--out-dir", required=True)
     tft.add_argument("--overwrite", action="store_true")
     tft.add_argument("--resume-from", default=None)
+    tft.add_argument("--encode-workers", type=int, default=8)
+    tft.add_argument("--encode-backend", choices=["pool", "shm"], default="pool")
+    tft.add_argument("--encode-slot-tokens", type=int, default=0)
+    tft.add_argument("--encode-num-slots", type=int, default=0)
 
     tft.add_argument("--vocab-size", type=int, default=10000)
     tft.add_argument("--context-length", type=int, default=256)
