@@ -500,6 +500,11 @@ def _train(args: argparse.Namespace) -> None:
     if device.startswith("cuda") and args.matmul_precision:
         torch.set_float32_matmul_precision(args.matmul_precision)
 
+    if args.cosine_cycle_iters is None:
+        args.cosine_cycle_iters = max(args.max_steps - 1, args.warmup_iters + 1)
+    elif args.cosine_cycle_iters < args.warmup_iters + 1:
+        args.cosine_cycle_iters = args.warmup_iters + 1
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = out_dir / "metrics.jsonl"
@@ -836,7 +841,7 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--learning-rate", type=float, default=3e-4)
     train.add_argument("--min-learning-rate", type=float, default=3e-5)
     train.add_argument("--warmup-iters", type=int, default=200)
-    train.add_argument("--cosine-cycle-iters", type=int, default=5000)
+    train.add_argument("--cosine-cycle-iters", type=int, default=None)
     train.add_argument("--beta1", type=float, default=0.9)
     train.add_argument("--beta2", type=float, default=0.95)
     train.add_argument("--eps", type=float, default=1e-8)
@@ -889,7 +894,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tft.add_argument("--learning-rate", type=float, default=3e-4)
     tft.add_argument("--min-learning-rate", type=float, default=3e-5)
     tft.add_argument("--warmup-iters", type=int, default=200)
-    tft.add_argument("--cosine-cycle-iters", type=int, default=5000)
+    tft.add_argument("--cosine-cycle-iters", type=int, default=None)
     tft.add_argument("--beta1", type=float, default=0.9)
     tft.add_argument("--beta2", type=float, default=0.95)
     tft.add_argument("--eps", type=float, default=1e-8)
